@@ -1,0 +1,89 @@
+diff --git a/roles/front_desk.py b/roles/front_desk.py
+--- a/roles/front_desk.py
++++ b/roles/front_desk.py
+@@ -815,42 +815,49 @@
+         - 不能把后到消息注入已运行子代理
+         """
+         try:
+-            leave_reply_trigger = self.context.debounce_manager.get_leave_reply_trigger(event)
+-            if leave_reply_trigger:
+-                decision = await self.fishing_reply.generate_reply_strategy(
+-                    chat_id, event, leave_reply_trigger
+-                )
+-            elif (
+-                self.status_checker.is_event_wake(event)
+-                and self.config_manager.for_chat(chat_id).force_reply_when_summoned
+-                and self.config_manager.for_chat(chat_id).direct_wake_fast_path
+-            ):
+-                # 点名、引用自己或直接称呼已经是明确的回复意图。
+-                # 此时再调秘书模型只会增加一次 LLM 延迟，不改变结果。
+-                # 但主脑重写仍必须复用防抖边界上的同一份账本快照；
+-                # 秘书正常路径会负责固化，快路径需要自行补齐。
+-                self._freeze_direct_wake_decision_context(chat_id, event)
+-                outline = (event.get_message_outline() or "").strip()
+-                sender_id = str(event.get_sender_id() or "")
+-                decision = SecretaryDecision(
+-                    should_reply=True,
+-                    is_questioned=True,
+-                    is_interesting=True,
+-                    reply_strategy="明确点名/引用，跳过秘书判断并直接回应",
+-                    topic=(outline[:48] or "直接交互"),
+-                    reply_target=sender_id,
+-                    entities=[sender_id] if sender_id else [],
+-                    keywords=[],
+-                )
+-                if hasattr(event, "set_extra"):
+-                    event.set_extra("angelheart_route", "direct_wake")
+-                logger.info(
+-                    f"AngelHeart[{chat_id}]: 命中快路径 route=direct_wake，已跳过秘书 LLM"
+-                )
+-            else:
+-                if hasattr(event, "set_extra"):
+-                    event.set_extra("angelheart_route", "ambient_secretary")
+-                decision = await self.secretary.handle_message_by_state(event)
++            from astrbot.core.wechat_reply_trace import trace_stage
++
++            with trace_stage(event, "decision") as outcome:
++                leave_reply_trigger = self.context.debounce_manager.get_leave_reply_trigger(event)
++                if leave_reply_trigger:
++                    decision = await self.fishing_reply.generate_reply_strategy(
++                        chat_id, event, leave_reply_trigger
++                    )
++                elif (
++                    self.status_checker.is_event_wake(event)
++                    and self.config_manager.for_chat(chat_id).force_reply_when_summoned
++                    and self.config_manager.for_chat(chat_id).direct_wake_fast_path
++                ):
++                    # 点名、引用自己或直接称呼已经是明确的回复意图。
++                    # 此时再调秘书模型只会增加一次 LLM 延迟，不改变结果。
++                    # 但主脑重写仍必须复用防抖边界上的同一份账本快照；
++                    # 秘书正常路径会负责固化，快路径需要自行补齐。
++                    self._freeze_direct_wake_decision_context(chat_id, event)
++                    outline = (event.get_message_outline() or "").strip()
++                    sender_id = str(event.get_sender_id() or "")
++                    decision = SecretaryDecision(
++                        should_reply=True,
++                        is_questioned=True,
++                        is_interesting=True,
++                        reply_strategy="明确点名/引用，跳过秘书判断并直接回应",
++                        topic=(outline[:48] or "直接交互"),
++                        reply_target=sender_id,
++                        entities=[sender_id] if sender_id else [],
++                        keywords=[],
++                    )
++                    if hasattr(event, "set_extra"):
++                        event.set_extra("angelheart_route", "direct_wake")
++                    logger.info(
++                        f"AngelHeart[{chat_id}]: 命中快路径 route=direct_wake，已跳过秘书 LLM"
++                    )
++                else:
++                    if hasattr(event, "set_extra"):
++                        event.set_extra("angelheart_route", "ambient_secretary")
++                    decision = await self.secretary.handle_message_by_state(event)
++                if decision is None:
++                    outcome["status"] = "failed"
++                elif not decision.should_reply:
++                    outcome["status"] = "skipped"
+ 
+             if decision and decision.should_reply:
+                 logger.info(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 import sqlite3
 from typing import Any
 
@@ -14,6 +15,32 @@ from .licensing.protocol import LicenseError
 
 
 class ChatApiMixin:
+    @staticmethod
+    def _conversation_page(items: list[dict], values: dict) -> dict:
+        """Page the merged directory by stable identity, including empty groups."""
+        def key(item):
+            return (-float(item.get("last_timestamp") or 0),
+                    str(item.get("type") or ""), str(item.get("conversation_id") or ""))
+
+        items.sort(key=key)
+        cursor = values.get("cursor")
+        if cursor is not None:
+            if (not isinstance(cursor, dict)
+                    or not isinstance(cursor.get("timestamp"), (int, float))
+                    or not math.isfinite(cursor["timestamp"])
+                    or cursor.get("type") not in {"private", "group"}
+                    or not isinstance(cursor.get("id"), str) or not cursor["id"]):
+                raise ValueError("聊天目录分页位置无效，请刷新后重试。")
+            boundary = (-float(cursor["timestamp"]), cursor["type"], cursor["id"])
+            items = [item for item in items if key(item) > boundary]
+        size = max(1, min(int(values.get("page_size") or 200), 500))
+        page, more = items[:size], len(items) > size
+        last = page[-1] if more else None
+        return {"items": page, "has_more": more, "next_cursor": {
+            "timestamp": float(last.get("last_timestamp") or 0),
+            "type": last["type"], "id": last["conversation_id"],
+        } if last else None}
+
     @staticmethod
     def _date_timestamp(value: object, *, end: bool = False) -> float | None:
         text = str(value or "").strip()
@@ -142,6 +169,7 @@ class ChatApiMixin:
                 start_time=start_time,
                 end_time=end_time,
                 account_id=account_id,
+                limit=None,
             )
             items = list(history.get("items") or [])
             private_contacts = self._history_contacts(
@@ -217,9 +245,10 @@ class ChatApiMixin:
             summary["visible_conversations"] = len(items)
             summary["directory_groups"] = len(directory.get("items") or [])
             return self._history_read_result(account_id, {
-                "items": items,
+                **self._conversation_page(items, values),
                 "summary": summary,
                 "account_id": account_id,
+                "sync_pending": getattr(self._history, "sync_pending", False) is True,
             })
         except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)

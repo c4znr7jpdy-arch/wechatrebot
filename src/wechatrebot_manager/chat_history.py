@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import csv
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from html import unescape
 import json
@@ -10,13 +11,17 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable
+import threading
+from typing import Any, Callable, Iterator
 import uuid
 
 from .location import chat_history_path
+from .history_cache import HistoryQueryCache, cached_history_read
+from . import history_summary
 
 
 _GROUP_ID = re.compile(r"([^:]+@chatroom)")
+HISTORY_IMPORT_BATCH_SIZE = 500
 _MESSAGE_XML = re.compile(
     r"^\s*(?:<\?xml[^>]*>\s*)?<(?:msg|appmsg|sysmsg)\b",
     re.IGNORECASE,
@@ -321,6 +326,9 @@ class ChatHistoryService:
         )
         self._migrate_legacy_history()
         self._initialize()
+        self._sync_lock = threading.Lock()
+        self._query_cache = HistoryQueryCache(self.path)
+        self.sync_pending = False
 
     def _migrate_legacy_history(self) -> None:
         """Copy an installation-local history database to stable user data."""
@@ -336,26 +344,27 @@ class ChatHistoryService:
         )
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            source = sqlite3.connect(self.legacy_path, timeout=5)
-            target = sqlite3.connect(temporary, timeout=5)
-            try:
+            with closing(sqlite3.connect(self.legacy_path, timeout=5)) as source, \
+                    closing(sqlite3.connect(temporary, timeout=5)) as target:
                 source.backup(target)
-            finally:
-                target.close()
-                source.close()
             os.replace(temporary, self.path)
         except (OSError, sqlite3.Error):
             # A damaged or locked legacy file must not prevent startup, and a
             # partial target must not block the next migration attempt.
             temporary.unlink(missing_ok=True)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=5)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA foreign_keys=ON")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -365,6 +374,7 @@ class ChatHistoryService:
                     source_key TEXT PRIMARY KEY,
                     last_message_id INTEGER NOT NULL DEFAULT 0,
                     account_backfill_complete INTEGER NOT NULL DEFAULT 0,
+                    account_backfill_cursor INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -429,18 +439,46 @@ class ChatHistoryService:
                     "ALTER TABLE import_sources ADD COLUMN "
                     "account_backfill_complete INTEGER NOT NULL DEFAULT 0"
                 )
+            if "account_backfill_cursor" not in import_columns:
+                connection.execute("ALTER TABLE import_sources ADD COLUMN "
+                                   "account_backfill_cursor INTEGER NOT NULL DEFAULT 0")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_history_account_conversation "
                 "ON messages(account_id, conversation_id, timestamp)"
             )
+            connection.commit()
+            history_summary.initialize(connection)
 
     def sync(self, *, strict: bool = False) -> int:
         """Refresh the index; mutations and exports reject unreadable sources."""
         source = self.bridge_source if self.bridge_source.is_file() else self.source
-        return self._sync_source(source, strict=strict)
+        # Interactive reads never queue behind another reader's import. Strict
+        # mutations still wait and drain the committed source snapshot first.
+        if not self._sync_lock.acquire(blocking=strict):
+            return 0
+        try:
+            upper_id = None
+            if strict and source.is_file():
+                uri = f"file:{source.resolve().as_posix()}?mode=ro"
+                connection = sqlite3.connect(uri, uri=True, timeout=2)
+                try:
+                    upper_id = connection.execute("SELECT MAX(id) FROM messages").fetchone()[0] or 0
+                finally:
+                    connection.close()
+            count = self._sync_source(source, strict=strict, upper_id=upper_id)
+            total = count
+            while strict and self.sync_pending:
+                count = self._sync_source(source, strict=True, upper_id=upper_id)
+                total += count
+            return total
+        finally:
+            self._sync_lock.release()
 
-    def _sync_source(self, source_path: Path, *, strict: bool = False) -> int:
+    def _sync_source(self, source_path: Path, *, strict: bool = False, upper_id: int | None = None) -> int:
         if not source_path.is_file():
+            if strict and upper_id is not None:
+                raise sqlite3.OperationalError("聊天记录来源在同步期间不可用，请稍后重试。")
+            self.sync_pending = False
             return 0
         source_key = str(source_path.resolve()).casefold()
         with self._connect() as target:
@@ -448,12 +486,13 @@ class ChatHistoryService:
             # delayed importer can restore rows another caller already deleted.
             target.execute("BEGIN IMMEDIATE")
             row = target.execute(
-                "SELECT last_message_id, account_backfill_complete "
+                "SELECT last_message_id, account_backfill_complete, account_backfill_cursor "
                 "FROM import_sources WHERE source_key = ?",
                 (source_key,),
             ).fetchone()
             last_id = int(row[0]) if row else 0
             backfill_complete = bool(row[1]) if row else False
+            backfill_cursor = int(row[2]) if row else 0
             source_uri = f"file:{source_path.resolve().as_posix()}?mode=ro"
             try:
                 source = sqlite3.connect(source_uri, uri=True, timeout=2)
@@ -477,17 +516,26 @@ class ChatHistoryService:
                            COALESCE(group_id, '') AS group_id, timestamp,
                            COALESCE(metadata, '{{}}') AS metadata
                     FROM messages
-                    WHERE id > ?
+                    WHERE id > ? AND (? IS NULL OR id <= ?)
                     ORDER BY id
+                    LIMIT ?
                     """,
-                    (last_id,),
+                    (last_id, upper_id, upper_id, HISTORY_IMPORT_BATCH_SIZE + 1),
                 ).fetchall()
+                self.sync_pending = len(rows) > HISTORY_IMPORT_BATCH_SIZE
+                rows = rows[:HISTORY_IMPORT_BATCH_SIZE]
+                if not rows and (backfill_complete or "account_id" not in source_columns):
+                    return 0
                 if "account_id" in source_columns and not backfill_complete:
                     unassigned = target.execute(
                         "SELECT source_message_id FROM messages "
-                        "WHERE source_key = ? AND account_id = ''",
-                        (source_key,),
+                        "WHERE source_key = ? AND account_id = '' AND source_message_id > ? "
+                        "ORDER BY source_message_id LIMIT ?",
+                        (source_key, backfill_cursor, HISTORY_IMPORT_BATCH_SIZE + 1),
                     ).fetchall()
+                    backfill_complete = len(unassigned) <= HISTORY_IMPORT_BATCH_SIZE
+                    self.sync_pending = self.sync_pending or not backfill_complete
+                    unassigned = unassigned[:HISTORY_IMPORT_BATCH_SIZE]
                     source_ids = [int(item[0]) for item in unassigned]
                     for offset in range(0, len(source_ids), 500):
                         batch = source_ids[offset : offset + 500]
@@ -507,7 +555,8 @@ class ChatHistoryService:
                                 if str(item["account_id"] or "").strip()
                             ),
                         )
-                    backfill_complete = True
+                    if source_ids:
+                        backfill_cursor = max(source_ids)
             except sqlite3.Error:
                 if strict:
                     raise
@@ -559,22 +608,25 @@ class ChatHistoryService:
             target.execute(
                 """
                 INSERT INTO import_sources(
-                    source_key, last_message_id, account_backfill_complete, updated_at
-                ) VALUES (?, ?, ?, ?)
+                    source_key, last_message_id, account_backfill_complete, account_backfill_cursor, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(source_key) DO UPDATE SET
                     last_message_id = excluded.last_message_id,
                     account_backfill_complete = excluded.account_backfill_complete,
+                    account_backfill_cursor = excluded.account_backfill_cursor,
                     updated_at = excluded.updated_at
                 """,
                 (
                     source_key,
                     highest,
                     int(backfill_complete),
+                    backfill_cursor,
                     datetime.now().astimezone().isoformat(),
                 ),
             )
             return len(rows)
 
+    @cached_history_read
     def conversations(
         self,
         *,
@@ -584,9 +636,8 @@ class ChatHistoryService:
         end_time: float | None = None,
         account_id: str = "",
         include_unassigned: bool = False,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> dict[str, Any]:
-        self.sync()
         clauses: list[str] = []
         params: list[object] = []
         normalized_account = str(account_id or "").strip()
@@ -640,10 +691,15 @@ class ChatHistoryService:
             LIMIT ?
         """
         total_params = tuple(params)
-        params.append(max(1, min(int(limit), 500)))
+        # The API merges the complete history summary with the live directory
+        # before paging; a missing summary must never be treated as zero history.
+        params.append(-1 if limit is None else max(1, min(int(limit), 500)))
         with self._connect() as connection:
-            rows = connection.execute(query, params).fetchall()
-            totals = connection.execute(
+            if not search.strip() and start_time is None and end_time is None:
+                rows, totals = history_summary.read(connection, normalized_account, kind, params[-1])
+            else:
+                rows = connection.execute(query, params).fetchall()
+                totals = connection.execute(
                 f"""
                 SELECT COUNT(*) AS messages,
                        COUNT(DISTINCT conversation_id) AS conversations,
@@ -653,7 +709,7 @@ class ChatHistoryService:
                 {where}
                 """,
                 total_params,
-            ).fetchone()
+                ).fetchone()
         return {
             "items": [
                 {
@@ -679,6 +735,7 @@ class ChatHistoryService:
             },
         }
 
+    @cached_history_read
     def messages(
         self,
         conversation_id: str,
@@ -692,7 +749,6 @@ class ChatHistoryService:
         include_unassigned: bool = False,
         limit: int = 200,
     ) -> tuple[dict[str, Any], ...]:
-        self.sync()
         clauses = ["conversation_id = ?"]
         params: list[object] = [conversation_id]
         normalized_account = str(account_id or "").strip()

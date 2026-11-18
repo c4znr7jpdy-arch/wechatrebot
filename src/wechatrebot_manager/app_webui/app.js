@@ -820,7 +820,7 @@
   }
 
   async function pollGroups() {
-    if (state.activePage !== "groups") return;
+    if (document.visibilityState === "hidden" || state.activePage !== "groups") return;
     if (state.chatManagementTab === "groups" && state.groupsLoaded) await loadGroups(false, {background: true});
     if (state.chatManagementTab === "private" && state.contactsLoaded) await loadContacts(false, {background: true});
   }

@@ -62,6 +62,8 @@ class Video(Component):
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
+    from wechatrebot_manager import reply_trace_runtime
+    monkeypatch.setitem(sys.modules, "astrbot.core.wechat_reply_trace", reply_trace_runtime)
     scope = {"__name__": __name__, "__package__": "empty_mention.roles", "json": json,
              "logger": logging.getLogger(__name__), "At": At, "AtAll": AtAll, "Plain": Plain,
              "Image": Image, "File": File, "Reply": Reply, "Record": Record, "Video": Video,
@@ -215,3 +217,22 @@ def test_handoff_component_read_failure_keeps_existing_dispatch_behavior(runtime
     assert event.message_str == ""
     assert event.is_at_or_wake_command
     runtime.front._finish_secretary_dispatch.assert_awaited_once()
+
+
+def test_decision_trace_records_no_reply_without_reason_or_identity(runtime, caplog):
+    event = runtime.event([], "private message")
+    event.get_platform_id = lambda: "aiocqhttp_hook41827"
+    event.get_group_id = lambda: "secret@chatroom"
+    event.is_at_or_wake_command = False
+    event.stop_event = Mock()
+    runtime.front.status_checker.is_event_wake = lambda _: False
+    runtime.front.secretary = NS(handle_message_by_state=AsyncMock(
+        return_value=NS(should_reply=False, reply_strategy="private decision reason")))
+    caplog.set_level(logging.INFO, logger="wechatrebot.reply_trace")
+    asyncio.run(runtime.front._call_secretary_and_execute(event, event.unified_msg_origin))
+    values = [json.loads(record.getMessage().removeprefix("WRB_REPLY_TRACE "))
+              for record in caplog.records if record.name == "wechatrebot.reply_trace"]
+    assert [value["status"] for value in values] == ["pending", "skipped"]
+    assert all(value["stage"] == "decision" for value in values)
+    assert "private" not in json.dumps(values) and "secret" not in json.dumps(values)
+    event.stop_event.assert_called_once()

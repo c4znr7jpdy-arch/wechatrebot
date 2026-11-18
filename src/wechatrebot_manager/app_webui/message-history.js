@@ -62,19 +62,39 @@ window.createMessageHistory = function (helpers) {
       renderHistoryAccountGate("");
       return;
     }
-    const load = ++state.historyLoad;
     const filters = historyFilters();
     const query = JSON.stringify([requestAccount, filters]);
-    const cached = state.historyConversationSnapshot;
-    const reuse = options?.localFilter === true && cached?.query === query;
+    const kind = state.historyKind;
+    const snapshotKey = JSON.stringify([query, kind]);
+    const cached = options.localFilter && state.historyConversationSnapshots?.get(snapshotKey)
+      || state.historyConversationSnapshot;
+    const compatible = cached?.query === query && (cached.kind === kind || (cached.kind === "all" && !cached.data.has_more));
+    const reuse = options?.localFilter === true && compatible;
+    const append = options?.append === true && cached?.query === query && cached.kind === kind && cached.data.has_more;
+    if (options?.append && (!append || state.historyConversationsLoading)) return;
+    const load = ++state.historyLoad;
     state.historyConversationsLoading = true;
     try {
-      const data = reuse ? cached.data : await requestHistoryRead(api("get_conversations", {
-        account_id: requestAccount,
-        kind: "all",
-        ...filters,
-        refresh_groups: options?.refreshGroups === true,
-      }));
+      let data = reuse ? cached.data : null;
+      if (!data) {
+        let items = append ? [...cached.data.items] : [];
+        let cursor = append ? cached.data.next_cursor : null;
+        const desired = append ? items.length + 200 : (compatible && !options.localFilter ? cached.data.items.length : 200);
+        do {
+          const page = await requestHistoryRead(api("get_conversations", {
+            account_id: requestAccount, kind, ...filters, page_size: 200, cursor,
+            refresh_groups: !cursor && options?.refreshGroups === true,
+          }));
+          if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
+          if (page.requires_login || page.account_changed || page.account_id !== requestAccount) { data = page; break; }
+          const merged = new Map(items.map(item => [JSON.stringify([item.type, item.conversation_id]), item]));
+          for (const item of page.items || []) merged.set(JSON.stringify([item.type, item.conversation_id]), item);
+          items = [...merged.values()];
+          data = {...page, items};
+          if (!page.has_more || !page.next_cursor || JSON.stringify(page.next_cursor) === JSON.stringify(cursor)) break;
+          cursor = page.next_cursor;
+        } while (items.length < desired);
+      }
       if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
       if (data.requires_login || data.account_changed || data.account_id !== requestAccount) {
         invalidateHistoryState();
@@ -83,7 +103,11 @@ window.createMessageHistory = function (helpers) {
       }
       saveSelectedHistoryMessages();
       state.historyActionNotice = null;
-      state.historyConversationSnapshot = {query, data};
+      state.historyConversationSnapshot = {query, kind: reuse ? cached.kind : kind, data};
+      const snapshots = state.historyConversationSnapshots ||= new Map();
+      snapshots.delete(snapshotKey);
+      snapshots.set(snapshotKey, state.historyConversationSnapshot);
+      while (snapshots.size > 6) snapshots.delete(snapshots.keys().next().value);
       state.conversations = (data.items || []).filter((item) => state.historyKind === "all" || item.type === state.historyKind);
       state.historyReadyAccount = requestAccount;
       setHistoryActionsEnabled(state.status?.runtime?.account_status_available !== false);
@@ -94,8 +118,10 @@ window.createMessageHistory = function (helpers) {
       const selected = state.conversations.find((item) => item.conversation_id === selectedId);
       const summary = data.summary || {};
       const visible = state.conversations.length;
-      const visibleMessages = state.conversations.reduce((sum, item) => sum + (item.message_count || 0), 0);
-      $("#historySummary").textContent = `${visible} 个聊天 · ${visibleMessages} 条消息 · 个人消息 ${state.conversations.filter((item) => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群聊消息 ${state.conversations.filter((item) => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0)} · 群目录 ${summary.directory_groups || 0}`;
+      const privateMessages = kind === "group" ? 0 : (summary.private_messages ?? state.conversations.filter(item => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0));
+      const groupMessages = kind === "private" ? 0 : (summary.group_messages ?? state.conversations.filter(item => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0));
+      const totalMessages = kind === "private" ? privateMessages : kind === "group" ? groupMessages : (summary.messages ?? privateMessages + groupMessages);
+      $("#historySummary").textContent = `${data.has_more ? "已显示 " : ""}${visible} 个聊天 · ${totalMessages} 条消息 · 个人消息 ${privateMessages} · 群聊消息 ${groupMessages} · 群目录 ${summary.directory_groups || 0}${data.sync_pending ? " · 正在补录历史消息…" : ""}`;
       renderConversations();
       if (selected) {
         await selectConversation(selected.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});
@@ -176,6 +202,7 @@ window.createMessageHistory = function (helpers) {
     state.historyMessageQuery = "";
     state.historyReadyAccount = "";
     state.historyConversationSnapshot = null;
+    state.historyConversationSnapshots?.clear();
   }
 
   function renderHistoryAccountGate(accountId) {
@@ -341,12 +368,22 @@ window.createMessageHistory = function (helpers) {
   function renderConversations() {
     const list = $("#conversationList");
     const previousScroll = list.scrollTop;
-    const markup = state.conversations.length ? state.conversations.map((item) => `
+    let markup = state.conversations.length ? state.conversations.map((item) => `
       <button class="conversation-item ${state.selectedConversation?.conversation_id === item.conversation_id ? "active" : ""}" data-conversation="${escapeHtml(item.conversation_id)}" data-type="${escapeHtml(item.type)}">
         ${avatarMarkup("conversation-avatar", item.display_name, item.avatar)}
         <span class="conversation-main"><span class="conversation-line"><strong>${escapeHtml(item.display_name)}</strong><time>${item.last_timestamp ? escapeHtml(new Date(item.last_timestamp * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false})) : "—"}</time></span><small class="conversation-id">${escapeHtml(item.conversation_id)}</small><small class="conversation-preview"><span class="conversation-preview-text">${escapeHtml(item.last_content ? displayMessageContent(item.last_content) : (item.message_count ? `${item.message_count} 条本机消息` : "暂无本机消息"))}</span>${item.type === "group" && item.group_membership === "left" ? '<span class="conversation-left-group" role="img" aria-label="已退群，当前机器人已不在此群，历史消息仍可查看" title="已退群，当前机器人已不在此群，历史消息仍可查看"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5M10 12h11m-4-4 4 4-4 4"/></svg></span>' : ""}</small></span>
       </button>`).join("") : '<div class="empty-state compact"><div class="empty-symbol">空</div><h2>没有找到聊天记录</h2><p>调整筛选条件或启动机器人接收新消息。</p></div>';
+    if (state.historyConversationSnapshot?.data.has_more) {
+      markup += '<button type="button" class="row-action" data-more-conversations>加载更多聊天</button>';
+    }
     if (!renderHistoryPanel(list, markup)) return;
+    list.querySelector("[data-more-conversations]")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = "正在读取…";
+      try { await loadConversations({append: true}); }
+      finally { button.disabled = false; button.textContent = "加载更多聊天"; }
+    });
     $$(".conversation-item", list).forEach((button) => button.addEventListener("click", () => selectConversation(button.dataset.conversation)));
     bindAvatarFallbacks(list);
     list.scrollTop = previousScroll;
@@ -786,7 +823,7 @@ window.createMessageHistory = function (helpers) {
   }
 
   async function pollHistory() {
-    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
+    if (document.visibilityState === "hidden" || state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
         || state.historyConversationsLoading || state.historyMessagesLoading
         || !state.historyAccount || state.status?.runtime?.account_status_available === false) return;
     state.historyPolling = true;

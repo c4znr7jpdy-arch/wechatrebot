@@ -59,7 +59,7 @@ function historyContext() {
     historyManualRefresh: false, historyReadyAccount: 'account-a'};
   const calls = [];
   const context = vm.createContext({state, $, Date, Map, Set, JSON, Number, String,
-    window: {setTimeout, clearTimeout},
+    window: {setTimeout, clearTimeout}, document: {visibilityState: 'visible'},
     api: async (method, id, filters) => { calls.push({method, id, filters}); return context.response(id); },
     renderConversations() {}, renderConversationHeader() {}, renderConversationInspector() {},
     bindAvatarFallbacks() {}, bindMessageSenderSelection() {}, updateSelectedSenderButtons() {},
@@ -376,6 +376,10 @@ async function unknownAccountPolling() {
   await c.pollHistory();
   assert.equal(reads, 0, 'unknown identity must not generate repeated history failures');
   s.status.runtime.account_status_available = true;
+  c.document.visibilityState = 'hidden';
+  await c.pollHistory();
+  assert.equal(reads, 0, 'hidden windows must not read history');
+  c.document.visibilityState = 'visible';
   await c.pollHistory();
   assert.equal(reads, 1, 'history polling resumes after the account probe recovers');
   s.status.runtime.account_status_available = false;
@@ -387,5 +391,21 @@ async function unknownAccountPolling() {
   assert.equal(reads, 1, 'missing history access must not poll');
 }
 
-(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); await retainedRefreshFailures(); historyAccessActions(); await unknownAccountPolling(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
+async function busyDirectoryAppend() {
+  const {context: c, state: s} = historyContext();
+  s.status = {runtime: {wechat_identity: 'account-a', account_status_available: true}};
+  c.response = () => ({account_id: 'account-a', items: [], summary: {}, has_more: true, next_cursor: {id: 'last'}});
+  await c.loadConversations();
+  let resolve;
+  c.response = () => new Promise(done => { resolve = done; });
+  const refreshing = c.loadConversations({silent: true});
+  const generation = s.historyLoad;
+  await c.loadConversations({append: true});
+  assert.equal(s.historyLoad, generation, 'ignored append must not invalidate an active refresh');
+  resolve({account_id: 'account-a', items: [], summary: {}, has_more: false});
+  await refreshing;
+  assert.equal(s.historyConversationsLoading, false);
+}
+
+(async () => { dates(); await history(); await retainMessagesAfterLongAbsence(); await olderMessagesDuringRefresh(); await olderMessagesRecovery(); await manualRefresh(); await retainedRefreshFailures(); historyAccessActions(); await unknownAccountPolling(); await busyDirectoryAppend(); console.log('history date, cache, pagination, refresh and account isolation: passed'); })()
   .catch(error => { console.error(error); process.exitCode = 1; });

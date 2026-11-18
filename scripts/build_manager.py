@@ -81,7 +81,6 @@ def main(argv: list[str] | None = None) -> int:
                 "pip",
                 "install",
                 "--disable-pip-version-check",
-                "--no-cache-dir",
                 "--requirement",
                 str(requirements),
             ],

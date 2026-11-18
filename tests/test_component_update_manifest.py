@@ -5,7 +5,7 @@ import json
 import pytest
 
 from test_updates import _channel_and_key, _incremental_manifest, _resign_manifest
-from wechatrebot_manager import updates
+from wechatrebot_manager import update_manifest, updates
 from wechatrebot_manager.payload import installed_payload_fingerprint
 from wechatrebot_manager.updates import UpdateError, manifest_package_releases, parse_update_manifest
 
@@ -15,6 +15,27 @@ def _component_manifest(channel, private, *, size=100):
     payload.pop("package")
     payload["component_update_protocol"] = 1
     return _resign_manifest(payload, channel, private)
+
+
+def test_manifest_contracts_keep_legacy_import_identity():
+    for name in ("UpdateError", "MandatoryUpdateUnavailable", "UpdateChannel", "UpdateRelease",
+                 "canonical_manifest_bytes", "manifest_package_releases", "is_newer_update"):
+        assert getattr(updates, name) is getattr(update_manifest, name)
+
+
+def test_selection_keeps_inventory_dependency_at_updates_boundary(tmp_path, monkeypatch):
+    channel, private = _channel_and_key()
+    payload = _component_manifest(channel, private)
+    reads = []
+
+    def inventory(root):
+        reads.append(root)
+        return "B" * 64
+
+    monkeypatch.setattr(updates, "installed_payload_fingerprint", inventory)
+    release = parse_update_manifest(payload, channel, current_version="0.7.0", install_root=tmp_path)
+    assert release.base_fingerprint == "B" * 64
+    assert reads == [tmp_path]
 
 
 @pytest.mark.parametrize("size", [100, 1234, 2000])
