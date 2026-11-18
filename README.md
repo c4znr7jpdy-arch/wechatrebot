@@ -74,6 +74,8 @@ Windows 两步安装向导、统一控制台、环境检测、全链路状态机
 
 `plugin_center.py` 保留功能目录、配置保存事务和独立窗口入口；`engine_api.py` 负责已鉴权的本机引擎请求，`plugin_configuration.py` 负责配置转换、脱敏、校验与冲突合并，`plugin_schema_profiles.py` 负责客户表单投影，`plugin_center_web.py` 负责静态资源、同源代理与 CSP，`plugin_errors.py` 提供共享异常。原 `plugin_center` 导入路径继续兼容，各规则只有一个实现。
 
+`update_manifest.py` 集中更新清单的类型、签名、包字段和版本规则；`updates.py` 保留安装基线读取、包选择、下载、安装事务和恢复协调，并重导出既有清单接口。清单验证不访问网络或安装目录；安装基线只在签名及包字段校验完成后读取，原有下载、进程与回滚测试替换点保持在 `updates`。
+
 内置 `app_webui/app.js` 负责共享状态、导航、事件与启动装配；九个页面工厂显式接收共享服务，不各自维护一份应用状态：
 
 | 工厂文件 | 职责 |
