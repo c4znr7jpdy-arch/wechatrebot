@@ -93,6 +93,7 @@ async def trace_model_responses(event, provider, payload, *, streaming):
     _emit(state, "model", "begin", "pending", operation=operation)
     duration, status = 0.0, "success"
     responses, primary_error, cleanup_status = None, None, None
+    final_response = not streaming
     try:
         if not streaming:
             started = time.monotonic()
@@ -114,6 +115,12 @@ async def trace_model_responses(event, provider, payload, *, streaming):
                     duration += time.monotonic() - started
                 if getattr(response, "role", None) == "err":
                     status = "failed"
+                if getattr(response, "is_chunk", None) is False:
+                    # The runner returns immediately after the final response.
+                    # Finish and close before yielding it so a completed request
+                    # cannot be left open or later misclassified as cancelled.
+                    final_response = True
+                    break
                 yield response
     except BaseException as exc:
         primary_error = exc
@@ -134,7 +141,7 @@ async def trace_model_responses(event, provider, payload, *, streaming):
         finally:
             _emit(state, "model", "end", status, operation=operation,
                   duration=duration, cleanup_status=cleanup_status)
-    if not streaming:
+    if final_response:
         yield response
 
 

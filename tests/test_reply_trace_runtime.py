@@ -13,8 +13,10 @@ from types import SimpleNamespace as NS
 from uuid import uuid4
 
 import pytest
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from wechatrebot_manager import reply_trace_runtime as trace
+from wechatrebot_manager.response_trace import ResponseTraceService
 from test_hot_config_runtime import _runtime_function
 
 
@@ -209,6 +211,197 @@ def test_closing_streaming_provider_iterator_records_cancelled_immediately(patch
         await responses.aclose()
         assert closed == [True], "underlying provider must close before wrapper.aclose returns"
         assert records(traced)[-1]["status"] == "cancelled"
+
+    asyncio.run(run())
+
+
+@pytest.fixture
+def fallback_runner(patched_engine):
+    source = (patched_engine / "astrbot/core/agent/runners/tool_loop_agent_runner.py").read_text("utf-8")
+    iterate = _runtime_function(source, "_iter_llm_responses", {})
+    fallback = _runtime_function(source, "_iter_llm_responses_with_fallback", {
+        "AsyncRetrying": AsyncRetrying, "retry_if_exception_type": retry_if_exception_type,
+        "stop_after_attempt": stop_after_attempt, "wait_exponential": wait_exponential,
+        "EmptyModelOutputError": type("EmptyModelOutputError", (Exception,), {}),
+        "LLMResponse": lambda **fields: NS(is_chunk=False, **fields),
+        "logger": logging.getLogger("test.fallback"),
+    })
+
+    def create(item, *streams):
+        providers = [NS(text_chat_stream=stream, provider_config={"id": str(index)})
+                     for index, stream in enumerate(streams)]
+        owner = NS(run_context=NS(context=NS(event=item), messages=[]),
+                   _sanitize_contexts_for_provider=lambda value: value, _func_tool_for_provider=lambda: None,
+                   req=NS(session_id="", extra_user_content_parts=[], model=""),
+                   _abort_signal=None, request_max_retries=1, streaming=True,
+                   provider=providers[0], fallback_providers=providers[1:],
+                   EMPTY_OUTPUT_RETRY_ATTEMPTS=1, EMPTY_OUTPUT_RETRY_WAIT_MIN_S=0,
+                   EMPTY_OUTPUT_RETRY_WAIT_MAX_S=0, _sanitize_malformed_tool_calls=lambda response: None)
+        owner._iter_llm_responses = lambda **kwargs: iterate(owner, **kwargs)
+        return fallback(owner)
+
+    return create
+
+
+def recorded_projection(tmp_path, caplog):
+    service = ResponseTraceService(tmp_path)
+    path = service.path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(
+        "[2026-11-18 12:00:00] [Core] [INFO] [core.wechat_reply_trace:1]: WRB_REPLY_TRACE "
+        + json.dumps(value) for value in records(caplog)), encoding="utf-8")
+    return service.recent()[0]
+
+
+def test_real_fallback_final_finishes_model_before_consumer_return(fallback_runner, traced, tmp_path):
+    closed = []
+
+    async def stream(**_kwargs):
+        try:
+            yield NS(role="assistant", is_chunk=True)
+            yield NS(role="assistant", is_chunk=False)
+        finally:
+            closed.append(True)
+
+    async def run():
+        item = event()
+        trace.trace_received(item)
+        responses = fallback_runner(item, stream)
+        with trace.trace_stage(item, "pipeline"):
+            async for response in responses:
+                if not response.is_chunk:
+                    assert closed == [True]
+                    assert records(traced)[-1]["stage"] == "model"
+                    assert records(traced)[-1]["status"] == "success"
+                    with trace.trace_stage(item, "send"):
+                        pass
+                    break  # The caller also stops on final without advancing again.
+        before_close = records(traced)
+        await responses.aclose()
+        assert records(traced) == before_close
+
+    asyncio.run(run())
+    assert [value["status"] for value in records(traced) if value["stage"] == "model"] == ["pending", "success"]
+    projected = recorded_projection(tmp_path, traced)
+    assert projected["complete"] and projected["status"] == "success"
+
+
+@pytest.mark.parametrize("failure", ["error_response", "exception"])
+def test_real_fallback_closes_failed_attempt_before_next_provider(fallback_runner, traced, tmp_path, failure):
+    closed = []
+
+    async def primary(**_kwargs):
+        try:
+            if failure == "exception":
+                raise RuntimeError("provider failed")
+            yield NS(role="err", is_chunk=False)
+        finally:
+            closed.append("primary")
+
+    async def secondary(**_kwargs):
+        assert closed == ["primary"]
+        assert records(traced)[-2]["status"] == "failed"
+        try:
+            yield NS(role="assistant", is_chunk=True)
+            yield NS(role="assistant", is_chunk=False)
+        finally:
+            closed.append("secondary")
+
+    async def run():
+        item = event()
+        trace.trace_received(item)
+        with trace.trace_stage(item, "pipeline"):
+            responses = [response async for response in fallback_runner(item, primary, secondary)]
+            assert [response.role for response in responses] == ["assistant", "assistant"]
+            assert closed == ["primary", "secondary"]
+            with trace.trace_stage(item, "send"):
+                pass
+
+    asyncio.run(run())
+    assert [value["status"] for value in records(traced)
+            if value["stage"] == "model" and value["phase"] == "end"] == ["failed", "success"]
+    projected = recorded_projection(tmp_path, traced)
+    assert projected["complete"] and projected["status"] == "success"
+
+
+@pytest.mark.parametrize("cancellation", ["close_after_chunk", "cancel_during_await"])
+def test_real_fallback_cancellation_closes_provider_before_pipeline(fallback_runner, traced, tmp_path, cancellation):
+    closed = []
+
+    async def run():
+        waiting = asyncio.Event()
+
+        async def stream(**_kwargs):
+            try:
+                yield NS(role="assistant", is_chunk=True)
+                waiting.set()
+                await asyncio.Event().wait()
+            finally:
+                closed.append(True)
+
+        item = event()
+        trace.trace_received(item)
+        responses = fallback_runner(item, stream)
+        with pytest.raises(asyncio.CancelledError):
+            with trace.trace_stage(item, "pipeline"):
+                assert (await anext(responses)).is_chunk
+                if cancellation == "close_after_chunk":
+                    await responses.aclose()
+                else:
+                    pending = asyncio.create_task(anext(responses))
+                    await waiting.wait()
+                    pending.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await pending
+                assert closed == [True]
+                assert records(traced)[-1]["stage"] == "model"
+                assert records(traced)[-1]["status"] == "cancelled"
+                raise asyncio.CancelledError()
+        before_close = records(traced)
+        await responses.aclose()
+        assert records(traced) == before_close
+
+    asyncio.run(run())
+    projected = recorded_projection(tmp_path, traced)
+    assert projected["complete"] and projected["status"] == "cancelled"
+
+
+def test_actual_step_stop_after_chunk_closes_fallback_before_finalizing(patched_engine, fallback_runner, traced):
+    source = (patched_engine / "astrbot/core/agent/runners/tool_loop_agent_runner.py").read_text("utf-8")
+    step = _runtime_function(source, "step", {
+        "AgentState": NS(IDLE="idle", RUNNING="running"),
+        "LLMResponse": lambda **fields: NS(is_chunk=False, **fields),
+    })
+    closed = []
+
+    async def stream(**_kwargs):
+        try:
+            yield NS(role="assistant", is_chunk=True, reasoning_content=None,
+                     reasoning_signature=None, result_chain=None, completion_text="")
+        finally:
+            closed.append(True)
+
+    async def process(messages, **_kwargs):
+        return messages
+
+    async def finalize(response):
+        assert closed == [True]
+        assert records(traced)[-1]["stage"] == "model"
+        assert records(traced)[-1]["status"] == "cancelled"
+        return response
+
+    async def run():
+        item = event()
+        trace.trace_received(item)
+        owner = NS(req=NS(conversation=None), _state="running", USER_INTERRUPTION_MESSAGE="stopped",
+                   stats=NS(time_to_first_token=1), run_context=NS(messages=[]),
+                   request_context_manager=NS(process=process), _transition_state=lambda state: None,
+                   _simple_print_message_role=lambda *_: None, _is_stop_requested=lambda: True,
+                   _iter_llm_responses_with_fallback=lambda: fallback_runner(item, stream),
+                   _finalize_aborted_step=finalize)
+        with trace.trace_stage(item, "pipeline"):
+            assert len([response async for response in step(owner)]) == 1
+        assert records(traced)[-1]["stage"] == "pipeline"
 
     asyncio.run(run())
 

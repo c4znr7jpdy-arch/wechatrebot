@@ -21,7 +21,7 @@ diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/exp
  
  
  class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
-@@ -471,12 +477,16 @@
+@@ -471,17 +477,23 @@
          if include_model:
              # For primary provider we keep explicit model selection if provided.
              payload["model"] = self.req.model
@@ -44,7 +44,171 @@ diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/exp
  
      async def _iter_llm_responses_with_fallback(
          self,
-@@ -816,28 +826,30 @@
+     ) -> T.AsyncGenerator[LLMResponse, None]:
+         """Wrap _iter_llm_responses with provider fallback handling."""
++        from contextlib import aclosing
++
+         candidates = [self.provider, *self.fallback_providers]
+         total_candidates = len(candidates)
+         last_exception: Exception | None = None
+@@ -513,29 +525,30 @@
+                     has_stream_output = False
+                     with attempt:
+                         try:
+-                            async for resp in self._iter_llm_responses(
++                            async with aclosing(self._iter_llm_responses(
+                                 include_model=idx == 0
+-                            ):
+-                                if resp.is_chunk:
+-                                    has_stream_output = True
++                            )) as responses:
++                                async for resp in responses:
++                                    if resp.is_chunk:
++                                        has_stream_output = True
++                                        yield resp
++                                        continue
++
++                                    if (
++                                        resp.role == "err"
++                                        and not has_stream_output
++                                        and (not is_last_candidate)
++                                    ):
++                                        last_err_response = resp
++                                        logger.warning(
++                                            "Chat Model %s returns error response, trying fallback to next provider.",
++                                            candidate_id,
++                                        )
++                                        break
++
++                                    self._sanitize_malformed_tool_calls(resp)
+                                     yield resp
+-                                    continue
+-
+-                                if (
+-                                    resp.role == "err"
+-                                    and not has_stream_output
+-                                    and (not is_last_candidate)
+-                                ):
+-                                    last_err_response = resp
+-                                    logger.warning(
+-                                        "Chat Model %s returns error response, trying fallback to next provider.",
+-                                        candidate_id,
+-                                    )
+-                                    break
+-
+-                                self._sanitize_malformed_tool_calls(resp)
+-                                yield resp
+-                                return
++                                    return
+ 
+                             if has_stream_output:
+                                 return
+@@ -733,54 +746,57 @@
+         )
+         self._simple_print_message_role("[AftCompact]", self.run_context.messages)
+ 
+-        async for llm_response in self._iter_llm_responses_with_fallback():
+-            if llm_response.is_chunk:
+-                if self.stats.time_to_first_token == 0:
+-                    self.stats.time_to_first_token = time.time() - self.stats.start_time
+-
+-                if llm_response.reasoning_content:
+-                    yield AgentResponse(
+-                        type="streaming_delta",
+-                        data=AgentResponseData(
+-                            chain=MessageChain(type="reasoning").message(
+-                                llm_response.reasoning_content,
++        from contextlib import aclosing
++
++        async with aclosing(self._iter_llm_responses_with_fallback()) as responses:
++            async for llm_response in responses:
++                if llm_response.is_chunk:
++                    if self.stats.time_to_first_token == 0:
++                        self.stats.time_to_first_token = time.time() - self.stats.start_time
++
++                    if llm_response.reasoning_content:
++                        yield AgentResponse(
++                            type="streaming_delta",
++                            data=AgentResponseData(
++                                chain=MessageChain(type="reasoning").message(
++                                    llm_response.reasoning_content,
++                                ),
+                             ),
+-                        ),
+-                    )
+-                if llm_response.result_chain:
+-                    yield AgentResponse(
+-                        type="streaming_delta",
+-                        data=AgentResponseData(chain=llm_response.result_chain),
+-                    )
+-                elif llm_response.completion_text:
+-                    yield AgentResponse(
+-                        type="streaming_delta",
+-                        data=AgentResponseData(
+-                            chain=MessageChain().message(llm_response.completion_text),
+-                        ),
+-                    )
+-                if self._is_stop_requested():
+-                    llm_resp_result = LLMResponse(
+-                        role="assistant",
+-                        completion_text=self.USER_INTERRUPTION_MESSAGE,
+-                        reasoning_content=llm_response.reasoning_content,
+-                        reasoning_signature=llm_response.reasoning_signature,
+-                    )
+-                    break
+-                continue
+-            llm_resp_result = llm_response
+-
+-            # Chunk responses have already continued above. A missing usage report
+-            # means the latest context occupancy is unknown.
+-            self.stats.current_context_tokens = 0
+-            if llm_response.usage:
+-                # Keep cumulative usage for billing and expose the latest request
+-                # input separately for context-window occupancy displays.
+-                self.stats.token_usage += llm_response.usage
+-                self.stats.current_context_tokens = llm_response.usage.input
+-                if self.req.conversation:
+-                    self.req.conversation.token_usage = llm_response.usage.total
+-            break  # got final response
++                        )
++                    if llm_response.result_chain:
++                        yield AgentResponse(
++                            type="streaming_delta",
++                            data=AgentResponseData(chain=llm_response.result_chain),
++                        )
++                    elif llm_response.completion_text:
++                        yield AgentResponse(
++                            type="streaming_delta",
++                            data=AgentResponseData(
++                                chain=MessageChain().message(llm_response.completion_text),
++                            ),
++                        )
++                    if self._is_stop_requested():
++                        llm_resp_result = LLMResponse(
++                            role="assistant",
++                            completion_text=self.USER_INTERRUPTION_MESSAGE,
++                            reasoning_content=llm_response.reasoning_content,
++                            reasoning_signature=llm_response.reasoning_signature,
++                        )
++                        break
++                    continue
++                llm_resp_result = llm_response
++
++                # Chunk responses have already continued above. A missing usage report
++                # means the latest context occupancy is unknown.
++                self.stats.current_context_tokens = 0
++                if llm_response.usage:
++                    # Keep cumulative usage for billing and expose the latest request
++                    # input separately for context-window occupancy displays.
++                    self.stats.token_usage += llm_response.usage
++                    self.stats.current_context_tokens = llm_response.usage.input
++                    if self.req.conversation:
++                        self.req.conversation.token_usage = llm_response.usage.total
++                break  # got final response
+ 
+         if not llm_resp_result:
+             if self._is_stop_requested():
+@@ -816,28 +832,30 @@
          if not llm_resp.tools_call_name:
              await self._complete_with_assistant_response(llm_resp)
  
@@ -96,7 +260,7 @@ diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/exp
  
          # 如果有工具调用，还需处理工具调用
          if llm_resp.tools_call_name:
-@@ -969,6 +981,17 @@
+@@ -969,6 +987,17 @@
  
              self.req.append_tool_calls_result(tool_calls_result)
  
@@ -114,7 +278,7 @@ diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/exp
      async def step_until_done(
          self, max_step: int
      ) -> T.AsyncGenerator[AgentResponse, None]:
-@@ -1014,6 +1037,25 @@
+@@ -1014,6 +1043,25 @@
                      tool_call_id=tool_call_id,
                      content=self._merge_follow_up_notice(content),
                  ),
@@ -140,7 +304,7 @@ diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/exp
              )
  
          # 执行函数调用
-@@ -1323,16 +1365,21 @@
+@@ -1323,16 +1371,21 @@
              )
              if param_subset.tools and tool_names:
                  contexts = self._build_tool_requery_context(tool_names)
@@ -172,7 +336,7 @@ diff --git a/official/astrbot/core/agent/runners/tool_loop_agent_runner.py b/exp
                  if requery_resp:
                      llm_resp = requery_resp
                      self._sanitize_malformed_tool_calls(llm_resp)
-@@ -1351,16 +1398,21 @@
+@@ -1351,16 +1404,21 @@
                          tool_names,
                          extra_instruction=self.SKILLS_LIKE_REQUERY_REPAIR_INSTRUCTION,
                      )
@@ -1399,7 +1563,7 @@ diff --git a/official/astrbot/core/wechat_reply_trace.py b/expected/astrbot/core
 new file mode 100644
 --- /dev/null
 +++ b/expected/astrbot/core/wechat_reply_trace.py
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,179 @@
 +"""Privacy-safe reply events; copied verbatim into the pinned engine patch.
 +
 +Only random correlation IDs, fixed stage names and measured times leave the
@@ -1495,6 +1659,7 @@ new file mode 100644
 +    _emit(state, "model", "begin", "pending", operation=operation)
 +    duration, status = 0.0, "success"
 +    responses, primary_error, cleanup_status = None, None, None
++    final_response = not streaming
 +    try:
 +        if not streaming:
 +            started = time.monotonic()
@@ -1516,6 +1681,12 @@ new file mode 100644
 +                    duration += time.monotonic() - started
 +                if getattr(response, "role", None) == "err":
 +                    status = "failed"
++                if getattr(response, "is_chunk", None) is False:
++                    # The runner returns immediately after the final response.
++                    # Finish and close before yielding it so a completed request
++                    # cannot be left open or later misclassified as cancelled.
++                    final_response = True
++                    break
 +                yield response
 +    except BaseException as exc:
 +        primary_error = exc
@@ -1536,7 +1707,7 @@ new file mode 100644
 +        finally:
 +            _emit(state, "model", "end", status, operation=operation,
 +                  duration=duration, cleanup_status=cleanup_status)
-+    if not streaming:
++    if final_response:
 +        yield response
 +
 +

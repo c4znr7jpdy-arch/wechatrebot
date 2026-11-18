@@ -33,3 +33,7 @@ writer 复用引擎日志及轮转，不新增数据库、后台任务或独立�
 2026-11-18 执行结果：`PYTHONPATH=src python -m pytest -q tests/test_reply_trace_runtime.py tests/test_response_trace.py tests/test_angel_empty_mention.py tests/test_provider_runtime_patch.py tests/test_license_runtime_patches.py tests/test_tool_reply_lifecycle.py tests/test_background_plugin_permissions.py` 为 97 passed；追加不回复决策用例后，前三个文件定向重跑为 38 passed。`python scripts/source_inputs.py` 通过，`git diff --check` 无差异格式错误。
 
 独立审查后补齐 provider 流的确定性关闭：外层关闭返回前等待底层可用的 `aclose()`；保留已有请求异常或取消，以固定 `cleanup_status` 标记二次清理失败，不输出异常文字。无 `aclose()` 的异步迭代器保持兼容。管理器每次读取动态选择实际日志路径，支持管理器先启动、引擎稍后首次创建日志。新增关闭顺序、关闭失败/取消、无关闭方法及日志延迟创建回归；两个 trace 测试文件为 31 passed。
+
+流式最终响应（`is_chunk=False`）在交给 runner 前完成模型阶段并关闭 provider，避免上层取到最终响应后直接返回，使正常请求被延后记录为取消。fallback 和 step 的消费边界也使用确定性关闭，覆盖候选切换、最终返回和分块中止。测试提取实际补丁后的三个 runner 方法并使用运行时相同版本的 tenacity，验证正常完成、错误响应/异常回退、等待中取消和分块后停止，确保模型结束记录先于整个回复处理结束；新增 tenacity 仅为测试依赖。
+
+上述流式边界修正后执行 `PYTHONPATH=src python -m pytest -q tests/test_reply_trace_runtime.py tests/test_response_trace.py tests/test_provider_runtime_patch.py tests/test_license_runtime_patches.py tests/test_tool_reply_lifecycle.py tests/test_background_plugin_permissions.py`，结果 97 passed；`git diff --check` 通过。
