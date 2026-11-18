@@ -108,3 +108,26 @@
 - 整合定向验证：历史浏览器/恢复43 passed（60.43秒）；trace/组件清单/启动预算67 passed；元数据校验通过；启动预算满足engine_config=4、plugin_config=40、lifecycle_refresh=1。所有测试命令在独立工作树执行，Python源码路径设为src。PR的CI与合并状态以GitHub为准，代码/本地验证状态不代表已经上线。
 
 - CI首轮发现SBOM在Windows写入CRLF后被Git规范化为LF导致登记哈希失配；已改用固定LF计算，工作树/提交字节哈希一致，元数据复检通过。PR：https://github.com/c4znr7jpdy-arch/wechatrebot/pull/220；完整CI与合并结果由该PR留痕。
+
+## 已运行的主要定向命令
+
+PowerShell执行前设置 `$env:PYTHONPATH=(Resolve-Path src).Path`。下面命令在本任务独立工作树或子任务独立工作树运行；插件/更新批次使用子任务 `.venv/Scripts/python.exe`。各批次有重复，不累加唯一测试总数。
+
+| 范围 | 命令 | 结果 |
+| --- | --- | --- |
+| 历史正确性 | `python -m pytest -q tests/test_chat_history.py tests/test_history_boundaries.py tests/test_history_directory.py` | 53通过 |
+| 历史性能与源中断 | `python -m pytest -q tests/test_history_performance.py` | 8通过 |
+| 历史浏览器 | `python -m pytest -q tests/test_history_webui.py tests/test_history_resume_webui.py` | 最终43通过 |
+| JS历史状态 | `node tests/history_webui.cjs` | 通过 |
+| 调度 | `python -B -m pytest -q tests/test_unified_schedule_store_async.py tests/test_unified_schedule_runtime.py tests/test_task_store.py tests/test_scheduled_delivery_policy.py` | 113通过 |
+| 插件隔离入口 | `python -B -m pytest -q -ra --tb=short -p no:cacheprovider tests/test_twitter_integration.py` | 12通过 |
+| 插件收集 | `python -B -m pytest --collect-only -q -p no:cacheprovider runtime/astrbot_plugin_twitter/tests` | 234项 |
+| 更新事务与兼容 | `python -B -m pytest -q --tb=short -p no:cacheprovider tests/test_updates.py tests/test_update_cache.py tests/test_update_restart_processes.py tests/test_unchanged_update_targets.py tests/test_component_update_manifest.py` | 198通过 |
+| 发行组装单测 | `python -B -m pytest -q --tb=short -p no:cacheprovider tests/test_update_release_builder.py tests/test_component_release_builder.py tests/test_update_message.py tests/test_publish_manager_update.py tests/test_local_incremental_update.py` | 84通过；只测试，不发布 |
+| trace/清单/预算整合 | `python -m pytest -q tests/test_response_trace.py tests/test_reply_trace_runtime.py tests/test_component_update_manifest.py tests/test_bootstrap_benchmark.py` | 67通过（流式收尾追加测试另记） |
+| 历史基准 | `python scripts/benchmark_history_queries.py --rows 300000` | 3.5ms首次/1.09ms缓存、聚合0次 |
+| 启动预算 | `python scripts/benchmark_manager_bootstrap.py --budget tests/fixtures/manager_bootstrap_budget.json` | 预算通过 |
+| 元数据 | `python scripts/validate_release_metadata.py` | ok=true |
+| 格式 | `git diff --check origin/master` | 通过 |
+
+没有执行本地全量测试、真实微信、正式安装器/载荷构建、发布或安装。GitHub CI包含冻结管理器自测，不等于已生成并发布客户安装包。
