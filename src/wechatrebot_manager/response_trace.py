@@ -1,281 +1,170 @@
+"""Project correlated reply events without returning log bodies or identities."""
 from __future__ import annotations
 
 from datetime import datetime
+import json
+import math
 from pathlib import Path
 import re
 from typing import Any
 
-from .customer_config import load_provider_profile
-from .customer_logs import tail_log
-from .diagnostics import white_label_terms
-from .provider import provider_display_name
+from .customer_logs import log_sources, read_log_tail, strip_log_ansi
 
 
-_CLOCK = re.compile(r"\[(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)\]")
-_MEMORY_COUNT = re.compile(r"(?:检索到|注入)\s*(\d+)\s*条记忆")
+_TRACE_LINE = re.compile(
+    r"^\[(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}(?:\.\d+)?\] "
+    r"\[Core\] \[INFO\] \[core\.wechat_reply_trace:\d+\]: WRB_REPLY_TRACE (\{.*\})$"
+)
+_LEGACY_SEND = re.compile(
+    r"^\[(?P<time>(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}(?:\.\d+)?)\] "
+    r"(?:\[Core\] )?\[INFO\] \[respond\.stage(?::\d+)?\]: Prepare to send\b"
+)
+_LABELS = {"received": "收到消息", "decision": "回复判断", "model": "模型请求", "send": "提交微信接口", "pipeline": "回复处理"}
+_STATUSES = {"pending", "success", "failed", "cancelled", "skipped"}
 
 
-def _timestamp(line: str, *, fallback_date: str) -> datetime | None:
-    match = _CLOCK.search(line)
-    if not match:
+def _duration_text(seconds: float) -> str:
+    return "<0.1 秒" if seconds < 0.1 else f"{seconds:.1f} 秒"
+
+
+def _number(value: object) -> bool:
+    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def _event(line: str) -> dict[str, Any] | None:
+    match = _TRACE_LINE.fullmatch(line)
+    if match is None:
         return None
-    value = f"{match.group('date') or fallback_date} {match.group('time')}"
     try:
-        return datetime.fromisoformat(value)
-    except ValueError:
+        event = json.loads(match[1])
+        if not isinstance(event, dict) or type(event.get("schema")) is not int or event["schema"] != 1:
+            return None
+        if not re.fullmatch(r"[0-9a-f]{32}", str(event.get("trace_id", ""))):
+            return None
+        if (event.get("stage") not in _LABELS or event.get("kind") not in {"group", "private"}
+                or event.get("status") not in _STATUSES or event.get("phase") not in {"point", "begin", "end"}):
+            return None
+        if (type(event.get("sequence")) is not int or not 1 <= event["sequence"] <= 512
+                or type(event.get("operation")) is not int or not 0 <= event["operation"] <= 512
+                or not _number(event.get("elapsed_ms"))):
+            return None
+        timestamp = datetime.fromisoformat(event["time"])
+        if timestamp.tzinfo is None:
+            return None
+        if event["phase"] == "point":
+            if event["stage"] != "received" or event["operation"] != 0 or event["status"] != "success":
+                return None
+        elif event["operation"] < 1 or event["stage"] == "received":
+            return None
+        elif event["phase"] == "begin":
+            if event["status"] != "pending":
+                return None
+        elif (event["status"] == "pending" or not _number(event.get("duration_ms"))
+              or event["duration_ms"] > event["elapsed_ms"] + 1):
+            return None
+        return event
+    except (ValueError, TypeError, KeyError, OverflowError):
         return None
 
 
-def _duration_text(seconds: float | None) -> str:
-    if seconds is None:
-        return ""
-    if seconds < 0.1:
-        return "<0.1 秒"
-    return f"{seconds:.1f} 秒"
-
-
-def _stage(
-    code: str,
-    label: str,
-    status: str = "success",
-    detail: str = "",
-    duration: float | None = None,
-    offset: float | None = None,
-) -> dict[str, Any]:
-    result = {"code": code, "label": label, "status": status}
-    if detail:
-        result["detail"] = detail
-    if duration is not None:
-        result["duration_seconds"] = round(max(0.0, duration), 3)
-        result["duration_text"] = _duration_text(max(0.0, duration))
-    if offset is not None:
-        result["offset_seconds"] = round(max(0.0, offset), 3)
-    return result
+def _project(events: list[dict[str, Any]]) -> dict[str, Any]:
+    # Grouping is by the event's random identifier, never log adjacency or chat.
+    ordered = sorted(events, key=lambda value: value["sequence"])
+    sequences = [value["sequence"] for value in ordered]
+    contiguous = (sequences == list(range(1, len(ordered) + 1))
+                  and len({value["kind"] for value in ordered}) == 1
+                  and all(left["elapsed_ms"] <= right["elapsed_ms"]
+                          for left, right in zip(ordered, ordered[1:])))
+    received = next((value for value in ordered if value["stage"] == "received"), None)
+    begins = {(value["stage"], value["operation"]): value for value in ordered if value["phase"] == "begin"}
+    ends = {(value["stage"], value["operation"]): value for value in ordered if value["phase"] == "end"}
+    stages = []
+    if received:
+        stages.append({"code": "received", "label": _LABELS["received"], "status": "success",
+                       "offset_seconds": received["elapsed_ms"] / 1000})
+    for key in dict.fromkeys((*begins, *ends)):
+        stage, _operation = key
+        begin, end = begins.get(key), ends.get(key)
+        if stage == "pipeline" and end and end["status"] == "success":
+            continue
+        status = end["status"] if end else "pending"
+        item = {"code": stage, "label": _LABELS[stage],
+                "status": "skipped" if status == "cancelled" else status}
+        if status == "cancelled":
+            item["detail"] = "任务已取消"
+        elif stage == "send" and status == "success":
+            item["detail"] = "微信接口已接受；不代表对方已收到"
+        if begin:
+            item["offset_seconds"] = begin["elapsed_ms"] / 1000
+        if begin and end and end["sequence"] > begin["sequence"] and end["elapsed_ms"] >= begin["elapsed_ms"]:
+            duration = end["duration_ms"] / 1000
+            item.update(duration_seconds=duration, duration_text=_duration_text(duration))
+        else:
+            item["duration_text"] = "耗时未知"
+        stages.append(item)
+    stages.sort(key=lambda value: value.get("offset_seconds", float("inf")))
+    pipeline = next((value for value in reversed(ordered) if value["stage"] == "pipeline" and value["phase"] == "end"), None)
+    complete = bool(received and contiguous and pipeline and pipeline is ordered[-1]
+                    and begins.keys() == ends.keys())
+    duration = pipeline["elapsed_ms"] / 1000 if complete else None
+    status = pipeline["status"] if pipeline else "pending"
+    sends = [value for value in ends.values() if value["stage"] == "send"]
+    if any(value["status"] == "failed" for value in sends):
+        status = "failed"
+    elif status == "skipped" and sends and all(value["status"] == "success" for value in sends):
+        # Exclusive command handlers stop propagation after their valid send.
+        status = "success"
+    elif status == "success" and not sends:
+        status = "skipped"
+    if not complete and status == "success":
+        status = "pending"
+    return {
+        "trace_id": ordered[0]["trace_id"], "time": ordered[-1]["time"],
+        "title": "群聊回复" if ordered[0]["kind"] == "group" else "私聊回复",
+        "status": status, "complete": complete,
+        "duration_seconds": duration,
+        "duration_text": _duration_text(duration) if duration is not None else "耗时未知",
+        "stages": stages,
+    }
 
 
 class ResponseTraceService:
-    """Project recent reply logs into privacy-safe, customer-readable stages."""
-
     def __init__(self, install_root: str | Path) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
-        self.path = self.install_root / "logs" / "astrbot-core.log"
-
-    def _model_label(self) -> str:
-        profile = load_provider_profile(self.install_root)
-        if profile is None:
-            return "回复模型"
-        normalized = profile.normalized()
-        return str(white_label_terms(provider_display_name(normalized.source_id, normalized.model)))
-
-    def _trace(self, lines: list[str], model_label: str) -> dict[str, Any] | None:
-        if not lines or not any("Prepare to send" in line for line in lines):
-            return None
-        today = datetime.now().date().isoformat()
-        entries = [
-            (line, _timestamp(line, fallback_date=today))
-            for line in lines
-        ]
-        times = [value for _line, value in entries if value is not None]
-        start = times[0] if times else None
-        end = times[-1] if times else None
-        stages: list[dict[str, Any]] = []
-
-        def first_time(predicate) -> datetime | None:
-            return next(
-                (value for line, value in entries if value is not None and predicate(line)),
-                None,
-            )
-
-        def last_time(predicate) -> datetime | None:
-            return next(
-                (value for line, value in reversed(entries) if value is not None and predicate(line)),
-                None,
-            )
-
-        def elapsed(begin: datetime | None, finish: datetime | None) -> float | None:
-            if begin is None or finish is None:
-                return None
-            return max(0.0, (finish - begin).total_seconds())
-
-        def offset(moment: datetime | None) -> float | None:
-            return elapsed(start, moment)
-
-        received_time = first_time(
-            lambda line: "core.event_bus" in line
-            or "tag:GroupMessage:" in line
-            or "tag:FriendMessage:" in line
-            or "收到消息" in line
-            or "message received" in line.casefold()
-        )
-        if received_time is not None:
-            stages.append(
-                _stage(
-                    "received",
-                    "收到消息",
-                    detail="已进入回复处理",
-                    duration=0.0,
-                    offset=offset(received_time),
-                )
-            )
-
-        direct = any("direct_wake" in line or "命中快路径" in line for line in lines)
-        decision_time = first_time(
-            lambda line: "direct_wake" in line
-            or "命中快路径" in line
-            or "秘书决策 action=" in line
-        )
-        if direct:
-            stages.append(
-                _stage(
-                    "decision",
-                    "点名快路径",
-                    detail="已跳过额外回复判断",
-                    duration=elapsed(start, decision_time),
-                    offset=0.0 if start is not None else None,
-                )
-            )
-        elif any("秘书决策 action=reply" in line for line in lines):
-            stages.append(
-                _stage(
-                    "decision",
-                    "回复判断",
-                    duration=elapsed(start, decision_time),
-                    offset=0.0 if start is not None else None,
-                )
-            )
-
-        memory_lines = [line for line in lines if "memory_recall" in line or "记忆召回" in line or "条记忆" in line]
-        memory_start = first_time(
-            lambda line: "memory_recall" in line or "开始记忆召回" in line
-        )
-        memory_end = last_time(
-            lambda line: "memory_recall" in line
-            or ("检索" in line and "超过" in line)
-            or "条记忆" in line
-        )
-        memory_duration = elapsed(memory_start, memory_end)
-        if any("short_casual" in line for line in memory_lines):
-            stages.append(_stage("memory", "长期记忆", "skipped", "普通寒暄无需查询", memory_duration, offset(memory_start)))
-        elif any("auto_recall_off" in line or "recall_state=disabled" in line for line in memory_lines):
-            stages.append(_stage("memory", "长期记忆已关闭", "skipped", duration=memory_duration, offset=offset(memory_start)))
-        elif any("超过" in line and "检索" in line for line in lines):
-            stages.append(_stage("memory", "长期记忆降级", "skipped", "检索超时，已继续回复", memory_duration, offset(memory_start)))
-        else:
-            counts = [int(match.group(1)) for line in memory_lines if (match := _MEMORY_COUNT.search(line))]
-            if counts:
-                count = max(counts)
-                stages.append(_stage("memory", f"长期记忆 {count} 条" if count else "长期记忆无结果", "success" if count else "skipped", duration=memory_duration, offset=offset(memory_start)))
-            elif any("explicit_memory_request" in line or "recall_state=searching" in line for line in memory_lines):
-                stages.append(_stage("memory", "明确回忆请求", duration=memory_duration, offset=offset(memory_start)))
-
-        emotion_time = first_time(lambda line: "compact 情绪上下文已注入" in line)
-        if any("compact 情绪上下文已注入" in line for line in lines):
-            emotion_candidates = [
-                value
-                for value in (decision_time, memory_end, start)
-                if value is not None and emotion_time is not None and value <= emotion_time
-            ]
-            emotion_start = max(emotion_candidates) if emotion_candidates else start
-            stages.append(
-                _stage(
-                    "emotion",
-                    "精简情感",
-                    duration=elapsed(emotion_start, emotion_time),
-                    offset=offset(emotion_start),
-                )
-            )
-        prepare_time = last_time(lambda line: "Prepare to send" in line)
-        model_start_candidates = [value for value in (decision_time, memory_end, emotion_time) if value]
-        model_start = max(model_start_candidates) if model_start_candidates else start
-        expression_time = first_time(
-            lambda line: "表情触发语音" in line or "meme_manager" in line
-        )
-        model_finish = (
-            expression_time
-            if expression_time is not None
-            and model_start is not None
-            and prepare_time is not None
-            and model_start <= expression_time <= prepare_time
-            else prepare_time
-        )
-        stages.append(
-            _stage(
-                "model",
-                model_label,
-                duration=elapsed(model_start, model_finish),
-                offset=offset(model_start),
-            )
-        )
-        if any("表情触发语音" in line for line in lines):
-            stages.append(_stage("voice", "语音生成", duration=elapsed(expression_time, prepare_time), offset=offset(expression_time)))
-        elif any("meme_manager" in line and "[]" not in line for line in lines):
-            stages.append(_stage("expression", "表情选择", duration=elapsed(expression_time, prepare_time), offset=offset(expression_time)))
-
-        voice = any("Prepare to send" in line and "ComponentType.Record" in line for line in lines)
-        completion_time = first_time(lambda line: "AI回复完成" in line or "发送完成" in line)
-        send_status = "success" if completion_time is not None else "pending"
-        stages.append(
-            _stage(
-                "send",
-                "语音发送" if voice else "文字发送",
-                send_status,
-                "" if completion_time is not None else "已交给微信连接发送",
-                elapsed(prepare_time, completion_time),
-                offset(prepare_time),
-            )
-        )
-        duration = max(0.0, (end - start).total_seconds()) if start and end else None
-        title = "群聊回复" if any("GroupMessage" in line for line in lines) else "私聊回复"
-        return {
-            "time": end.astimezone().isoformat(timespec="milliseconds") if end else "",
-            "title": title,
-            "duration_seconds": round(duration, 1) if duration is not None else None,
-            "duration_text": f"{duration:.1f} 秒" if duration is not None else "已完成",
-            "stages": stages,
-        }
+        self.path = next(source.path for source in log_sources(self.install_root) if source.key == "engine-runtime")
 
     def recent(self, limit: int = 12) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
-        lines = tail_log(self.path, max_bytes=1024 * 1024, max_lines=3000).splitlines()
-        anchors = [index for index, line in enumerate(lines) if "Prepare to send" in line]
-        traces: list[dict[str, Any]] = []
-        model_label = self._model_label()
-        previous_anchor = -1
-        for position, anchor in enumerate(anchors):
-            floor = max(previous_anchor + 1, anchor - 100)
-            inbound = [
-                index for index in range(floor, anchor + 1)
-                if "core.event_bus" in lines[index]
-            ]
-            start = inbound[-1] if inbound else floor
-            next_anchor = anchors[position + 1] if position + 1 < len(anchors) else len(lines)
-            next_inbound = next(
-                (
-                    index
-                    for index in range(anchor + 1, min(next_anchor, len(lines)))
-                    if "core.event_bus" in lines[index]
-                ),
-                next_anchor,
-            )
-            end_index = min(next_inbound, anchor + 40)
-            completion = next(
-                (
-                    index
-                    for index in range(anchor + 1, end_index)
-                    if "AI回复完成" in lines[index] or "发送完成" in lines[index]
-                ),
-                None,
-            )
-            if completion is not None:
-                end_index = completion + 1
-            else:
-                end_index = anchor + 1
-            trace = self._trace(lines[start:end_index], model_label)
-            if trace is not None:
-                traces.append(trace)
-            previous_anchor = anchor
-        return list(reversed(traces[-limit:]))
+        try:
+            text, _truncated = read_log_tail(self.path, max_bytes=1024 * 1024, max_lines=3000)
+        except FileNotFoundError:
+            return []
+        lines = strip_log_ansi(text).splitlines()
+        groups: dict[str, list[dict[str, Any]]] = {}
+        legacy = []
+        for line in lines:
+            event = _event(line)
+            if event:
+                groups.setdefault(event["trace_id"], []).append(event)
+            elif match := _LEGACY_SEND.match(line):
+                # This one record proves only that send preparation was reached.
+                # Adjacent receive/completion lines may belong to another reply.
+                timestamp = match["time"]
+                legacy.append({
+                    "time": timestamp.replace(" ", "T") if len(timestamp) > 15 else "",
+                    "title": "历史回复（关联信息不足）", "status": "pending", "complete": False,
+                    "duration_seconds": None, "duration_text": "耗时未知",
+                    "stages": [{"code": "send", "label": "准备发送", "status": "pending",
+                                "duration_text": "耗时未知", "detail": "旧日志缺少请求标识，无法确认阶段关联和发送结果"}],
+                })
+        if groups:
+            # Do not duplicate the unstructured Prepare-to-send line emitted by
+            # the same new engine, or mix uncorrelated stages into a real trace.
+            traces = [_project(events) for events in groups.values()]
+            traces.sort(key=lambda value: value["time"], reverse=True)
+            return traces[:min(limit, 50)]
+        return list(reversed(legacy[-min(limit, 50):]))
 
 
 __all__ = ["ResponseTraceService"]
