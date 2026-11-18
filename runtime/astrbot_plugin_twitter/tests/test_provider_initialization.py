@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from dataclasses import replace
 import importlib.util
 import json
 import re
@@ -211,6 +212,7 @@ def subscription_list_query(plugin_module):
             pytest.fail("查询列表不得写入 KV")
 
         plugin = plugin_module.TwitterPlugin.__new__(plugin_module.TwitterPlugin)
+        plugin.text_render_mode = "text"
         plugin.subscription_service = plugin_module.SubscriptionService(
             get_kv, put_kv, object(), lambda: False
         )
@@ -223,9 +225,8 @@ def subscription_list_query(plugin_module):
                 get_self_id=lambda: "123456789",
             )
             results = [result async for result in plugin.list_follows(event)]
-            assert len(results) == 1
             assert store == original
-            return results[0]
+            return results
 
         return query
 
@@ -234,68 +235,47 @@ def subscription_list_query(plugin_module):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [1, 50, 51, 104, 115])
-async def test_subscription_list_forward_is_complete(subscription_list_query, count):
+async def test_subscription_list_text_chunks_are_complete(subscription_list_query, count):
     query = subscription_list_query(count)
-    result = await query()
-    assert isinstance(result, MessageChain)
-    assert len(result.chain) == 1
-    assert isinstance(result.chain[0], Nodes)
-    nodes = result.chain[0].nodes
+    chunks = await query()
     seen = []
-    for index, node in enumerate(nodes, 1):
-        assert isinstance(node, Node)
-        assert node.uin == "123456789"
-        assert node.name == "推特订阅列表"
-        assert len(node.content) == 1
-        assert isinstance(node.content[0], Plain)
-        text = node.content[0].text
+    for index, text in enumerate(chunks, 1):
+        assert isinstance(text, str)
         assert len(text) <= 1000
-        assert f"共 {count} 个，第 {index}/{len(nodes)} 段" in text
-        rows = re.findall(r"^(\d+)\. 🟢 @(\w+) \(x\)$", text, re.MULTILINE)
+        assert f"共 {count} 个，第 {index}/{len(chunks)} 段" in text
+        rows = re.findall(r"^(\d+)\. 🟢 @(\w+) \(x\) \| 文字$", text, re.MULTILINE)
         assert 1 <= len(rows) <= 50
         seen.extend(rows)
         assert "下一页" not in text
         assert "private_only" not in text
     assert seen == [(str(i + 1), f"u{i}") for i in range(count)]
     private_result = await query(umo="private")
-    private_nodes = private_result.chain[0].nodes
-    assert len(private_nodes) == 1
-    assert "@private_only (private_only)" in private_nodes[0].content[0].text
-    if count == 50:
-        assert len(nodes) == 1
-    if count == 51:
-        assert len(nodes) == 2
+    assert len(private_result) == 1
+    assert "@private_only (private_only) | 文字" in private_result[0]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["测试\n\t 用户  名", "测😀" * 80])
 async def test_subscription_list_limits_long_names(subscription_list_query, name):
     query = subscription_list_query(115, name, flags=True)
-    result = await query()
-    assert isinstance(result, MessageChain)
-    nodes = result.chain[0].nodes
+    chunks = await query()
     display_name = " ".join(name.split())
     if len(display_name) > 50:
         display_name = display_name[:49] + "…"
     rows = []
-    for node in nodes:
-        text = node.content[0].text
+    for text in chunks:
         assert len(text) <= 1000
         rows.extend(line for line in text.splitlines() if re.match(r"\d+\. ", line))
     assert rows == [
-        f"{i + 1}. 🔴 @u{i} ({display_name}) | R18 | 仅媒体"
+        f"{i + 1}. 🔴 @u{i} ({display_name}) | 文字 | R18 | 仅媒体"
         for i in range(115)
     ]
-    assert len(re.findall(r"^\d+\. ", nodes[0].content[0].text, re.MULTILINE)) < 50
+    assert len(re.findall(r"^\d+\. ", chunks[0], re.MULTILINE)) < 50
 
 
 @pytest.mark.asyncio
 async def test_subscription_list_empty(subscription_list_query):
-    assert await subscription_list_query(0)() == "当前没有订阅任何推主"
-
-
-async def _wait_forever():
-    await asyncio.Event().wait()
+    assert await subscription_list_query(0)() == ["当前没有订阅任何推主"]
 
 
 def _delivery_contract(plugin_module):
@@ -367,6 +347,11 @@ async def test_false_send_retains_cursor_and_recovers(
             "twitter_deduplicate_retweets": True,
         },
     )
+    # Exercise the reusable delivery service's modes; the WeChat adapter keeps
+    # node/collective modes disabled and has separate integration assertions.
+    plugin.delivery_service.settings = replace(
+        plugin.delivery_service.settings, use_node=use_node, collective_forward=collective,
+    )
     plugin.get_kv_data = get_kv
     plugin.put_kv_data = put_kv
     plugin.twitter_api.get_user_timeline_items = timeline
@@ -408,29 +393,56 @@ async def test_false_send_retains_cursor_and_recovers(
 
 
 @pytest.mark.asyncio
-async def test_fxtwitter_initialization_skips_nitter(plugin_module):
-    config = {
-        "basic": {
-            "twitter_data_provider": "fxtwitter",
-            "twitter_fxtwitter_api_base": "https://api.fxtwitter.com/",
-            "twitter_nitter_url": "https://must-not-be-used.example",
-        }
-    }
-    plugin = plugin_module.TwitterPlugin(object(), config)
-    plugin._poll_tweets = _wait_forever
+@pytest.mark.parametrize("provider", ["fxtwitter", "nitter"])
+@pytest.mark.parametrize("health", [True, False, "error"])
+async def test_initialization_checks_provider_in_background_and_keeps_recovery(
+    plugin_module, provider, health,
+):
+    plugin = plugin_module.TwitterPlugin(object(), {"twitter_data_provider": provider})
+    fake = plugin.twitter_api
+    entered, release, waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    polls = []
 
-    assert plugin.website_list == []
-    assert plugin.fxtwitter_api_base == "https://api.fxtwitter.com"
-    await plugin.initialize()
+    async def check(*_args):
+        entered.set()
+        await release.wait()
+        if provider == "fxtwitter":
+            fake.fx_checks += 1
+        else:
+            fake.nitter_checks += 1
+        if health == "error":
+            raise RuntimeError("proxy unavailable")
+        fake.provider_ready = health
+        fake.nitter_url = "https://nitter.test" if health else ""
+        return health
 
-    fake = FakeTwitterAPI.instances[-1]
-    assert fake.fx_checks == 1
-    assert fake.nitter_checks == 0
-    assert plugin._provider_ready is True
-    assert plugin._poll_task is not None
+    async def check_all():
+        polls.append(True)
 
-    await plugin.terminate()
-    assert fake.closed is True
+    async def wait_for_next_poll():
+        waiting.set()
+        await asyncio.Event().wait()
+
+    fake.check_fxtwitter_available = fake.check_website_available = check
+    plugin._check_all_subscriptions = check_all
+    plugin._wait_for_next_poll = wait_for_next_poll
+    try:
+        # Initialization must finish while the first health request is blocked.
+        await asyncio.wait_for(plugin.initialize(), 1)
+        await asyncio.wait_for(entered.wait(), 1)
+        assert plugin._running and plugin._poll_task is not None
+        assert not plugin._provider_ready
+        assert fake.fx_checks == fake.nitter_checks == 0
+        release.set()
+        await asyncio.wait_for(waiting.wait(), 1)
+        assert fake.fx_checks == (provider == "fxtwitter")
+        assert fake.nitter_checks == (provider == "nitter")
+        assert plugin._provider_ready is (health is True)
+        assert polls == ([True] if health is True else [])
+        assert plugin._running and not plugin._poll_task.done()
+    finally:
+        await plugin.terminate()
+    assert plugin._poll_task.done() and fake.closed
 
 
 def test_fxtwitter_readiness_stays_in_sync_with_api(plugin_module):
@@ -447,72 +459,6 @@ def test_fxtwitter_readiness_stays_in_sync_with_api(plugin_module):
 
     plugin._provider_ready = True
     assert plugin.twitter_api.is_ready is True
-
-
-@pytest.mark.asyncio
-async def test_fxtwitter_initialization_failure_keeps_recovery_task(
-    plugin_module,
-    monkeypatch,
-):
-    async def unavailable(self):
-        self.fx_checks += 1
-        self.provider_ready = False
-        return False
-
-    monkeypatch.setattr(
-        FakeTwitterAPI,
-        "check_fxtwitter_available",
-        unavailable,
-    )
-    plugin = plugin_module.TwitterPlugin(
-        object(),
-        {"basic": {"twitter_data_provider": "fxtwitter"}},
-    )
-    plugin._poll_tweets = _wait_forever
-
-    await plugin.initialize()
-
-    fake = FakeTwitterAPI.instances[-1]
-    assert fake.fx_checks == 1
-    assert plugin._provider_ready is False
-    assert plugin._running is True
-    assert plugin._poll_task is not None
-
-    await plugin.terminate()
-    assert fake.closed is True
-
-
-@pytest.mark.asyncio
-async def test_fxtwitter_health_exception_keeps_recovery_task(
-    plugin_module,
-    monkeypatch,
-):
-    async def unavailable(self):
-        self.fx_checks += 1
-        self.provider_ready = False
-        raise RuntimeError("proxy unavailable")
-
-    monkeypatch.setattr(
-        FakeTwitterAPI,
-        "check_fxtwitter_available",
-        unavailable,
-    )
-    plugin = plugin_module.TwitterPlugin(
-        object(),
-        {"basic": {"twitter_data_provider": "fxtwitter"}},
-    )
-    plugin._poll_tweets = _wait_forever
-
-    await plugin.initialize()
-
-    fake = FakeTwitterAPI.instances[-1]
-    assert fake.fx_checks == 1
-    assert plugin._provider_ready is False
-    assert plugin._running is True
-    assert plugin._poll_task is not None
-
-    await plugin.terminate()
-    assert fake.closed is True
 
 
 @pytest.mark.asyncio
@@ -553,54 +499,6 @@ async def test_fxtwitter_polling_retries_until_recovered(plugin_module):
     assert fake.fx_checks == 2
     assert polls == 1
     assert plugin._provider_ready is True
-
-
-@pytest.mark.asyncio
-async def test_nitter_default_preserves_original_initialization(plugin_module):
-    plugin = plugin_module.TwitterPlugin(object(), {})
-    plugin._poll_tweets = _wait_forever
-
-    assert plugin.data_provider == "nitter"
-    assert plugin.website_list == ["https://nitter.test"]
-    await plugin.initialize()
-
-    fake = FakeTwitterAPI.instances[-1]
-    assert fake.nitter_checks == 1
-    assert fake.fx_checks == 0
-    assert plugin._provider_ready is True
-
-    await plugin.terminate()
-
-
-@pytest.mark.asyncio
-async def test_nitter_initialization_failure_still_skips_polling(
-    plugin_module,
-    monkeypatch,
-):
-    async def unavailable(self, _websites):
-        self.nitter_checks += 1
-        self.nitter_url = ""
-        self.provider_ready = False
-        return None
-
-    monkeypatch.setattr(
-        FakeTwitterAPI,
-        "check_website_available",
-        unavailable,
-    )
-    plugin = plugin_module.TwitterPlugin(object(), {})
-    plugin._poll_tweets = _wait_forever
-
-    await plugin.initialize()
-
-    fake = FakeTwitterAPI.instances[-1]
-    assert fake.nitter_checks == 1
-    assert plugin._provider_ready is False
-    assert plugin._running is False
-    assert plugin._poll_task is None
-
-    await plugin.terminate()
-    assert fake.closed is True
 
 
 def test_flat_and_grouped_provider_config_are_compatible(plugin_module):
@@ -895,6 +793,7 @@ def test_timeline_metadata_is_the_only_source_of_retweet_context(plugin_module):
 async def test_commands_report_timeline_failures_clearly(plugin_module):
     plugin = plugin_module.TwitterPlugin.__new__(plugin_module.TwitterPlugin)
     plugin._provider_ready = True
+    plugin.text_render_mode = "text"
     store = {}
 
     class API:
@@ -996,6 +895,7 @@ async def test_existing_author_subscription_reuses_cursor_without_api_calls(
         "status": True,
         "r18": True,
         "media": True,
+        "delivery_mode": "text",
     }
 
 
@@ -1173,6 +1073,12 @@ async def test_test_command_and_link_recognition_share_prepared_delivery(
 ):
     plugin = plugin_module.TwitterPlugin.__new__(plugin_module.TwitterPlugin)
     plugin._provider_ready = True
+    plugin.text_render_mode = "text"
+
+    async def snapshot():
+        return {}
+
+    plugin.subscription_service = types.SimpleNamespace(get_snapshot=snapshot)
     plugin.include_retweets = True
     plugin.link_recognition_mode = plugin_module.LINK_RECOGNITION_MODE_AUTO
 
@@ -1813,6 +1719,9 @@ async def test_delivery_history_and_cursor_share_one_write(plugin_module, use_no
         "twitter_use_node": use_node, "twitter_collective_forward": collective,
         "twitter_deduplicate_retweets": False,
     })
+    plugin.delivery_service.settings = replace(
+        plugin.delivery_service.settings, use_node=use_node, collective_forward=collective,
+    )
     plugin.get_kv_data, plugin.put_kv_data = get_kv, put_kv
     plugin.twitter_api.get_user_timeline_items = timeline
     plugin.twitter_api.get_tweet = get_tweet

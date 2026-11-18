@@ -16,9 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+    "beautifulsoup4==4.14.3",
     "qrcode==8.2",
     "aiohttp==3.13.5",
-    "httpx==0.28.1",
+    "httpx[http2]==0.28.1",
+    "h2==4.3.0",
     "openai==2.37.0",
     "imageio-ffmpeg==0.6.0",
     "pillow==12.2.0",
