@@ -115,7 +115,7 @@ window.createMessageHistory = function (helpers) {
       const privateMessages = summary.private_messages ?? state.conversations.filter(item => item.type === "private").reduce((sum, item) => sum + (item.message_count || 0), 0);
       const groupMessages = summary.group_messages ?? state.conversations.filter(item => item.type === "group").reduce((sum, item) => sum + (item.message_count || 0), 0);
       const totalMessages = kind === "private" ? privateMessages : kind === "group" ? groupMessages : (summary.messages ?? privateMessages + groupMessages);
-      $("#historySummary").textContent = `${data.has_more ? "已显示 " : ""}${visible} 个聊天 · ${totalMessages} 条消息 · 个人消息 ${privateMessages} · 群聊消息 ${groupMessages} · 群目录 ${summary.directory_groups || 0}`;
+      $("#historySummary").textContent = `${data.has_more ? "已显示 " : ""}${visible} 个聊天 · ${totalMessages} 条消息 · 个人消息 ${privateMessages} · 群聊消息 ${groupMessages} · 群目录 ${summary.directory_groups || 0}${data.sync_pending ? " · 正在补录历史消息…" : ""}`;
       renderConversations();
       if (selected) {
         await selectConversation(selected.conversation_id, {silent, cachedOnly: reuse, latest: options.latest, forceRefresh: options.forceRefresh});

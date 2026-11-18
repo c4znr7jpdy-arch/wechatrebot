@@ -248,6 +248,7 @@ class ChatApiMixin:
                 **self._conversation_page(items, values),
                 "summary": summary,
                 "account_id": account_id,
+                "sync_pending": getattr(self._history, "sync_pending", False) is True,
             })
         except (OSError, ValueError, sqlite3.Error) as exc:
             return self._failed(exc)

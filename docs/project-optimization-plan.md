@@ -11,7 +11,7 @@
 | 1 | OPT-01 | 聊天历史数据库连接确定性关闭 | 高 | 已完成，待 CI | 成功及异常均关闭，事务语义保持 |
 | 2 | OPT-02 | 会话目录分页与准确统计 | 高 | 已完成，待 CI | 超过 200 个会话可访问，分类/筛选/账号切换正确 |
 | 3 | OPT-03 | 调度数据库操作移出事件循环 | 高 | 已完成，待 CI | 写锁不阻塞心跳，取消/停机无悬挂任务 |
-| 4 | OPT-04 | 历史查询缓存与分批同步 | 高 | 待实施 | 无变化不重复聚合，积压有界，同步删除不复活 |
+| 4 | OPT-04 | 历史查询缓存与分批同步 | 高 | 已完成，待 CI | 无变化不重复聚合，积压有界，同步删除不复活 |
 | 5 | OPT-05 | 并发回复链路关联 | 中 | 待实施 | 并发不串链路，未知耗时不伪造，不记录正文 |
 | 6 | OPT-06 | 补齐插件测试入口 | 中 | 待实施 | 既有测试实际被收集，修正过期夹具及清理 |
 | 7 | OPT-07 | CI 去重、缓存与性能回归证据 | 中 | 待实施 | 保留完整检查，旧运行取消，确定性预算可检查 |
@@ -97,3 +97,4 @@
 - OPT-01：修改 `chat_history.py`、`tests/test_chat_history.py`，复用 TaskStore 的上下文管理方式；初始化异常也进入 finally 关闭。定向验证：`$env:PYTHONPATH='src'; python -m pytest -q tests/test_chat_history.py`，14 passed。首次未设置源码搜索路径导致收集失败，修正执行环境后通过；未安装/启动机器人。
 - OPT-02：完整合并目录后按 `(timestamp, type, id)` 游标分页，新增加载更多和服务端分类，刷新保留已展开条数与选择，总消息数使用服务端汇总。变更 `chat_history.py`、`chat_api.py`、`message-history.js`，新增 `test_history_directory.py`，扩展 `test_history_webui.py`；边界测试的连接观察器适配 OPT-01 上下文接口，四个失败已修复。`PYTHONPATH=src` 下历史/目录/边界 53 passed；历史浏览器及恢复测试 42 passed（60.19 秒）；`node tests/history_webui.cjs` 通过。使用现有 Playwright 离线预览：Browser plugin not available；1380×860 截图、控制台、251 会话加载更多/分类/刷新均通过，不启动机器人。
 - OPT-03：修改 `runtime/jiang_schedule/unified_runtime.py`，新增 `test_unified_schedule_store_async.py`。复用同步 TaskStore 事务，串行后台数据库操作、取消与停机收尾后释放租约；即时测试、已领取任务和发送回执均覆盖。定向调度/Store/迁移/内容测试 113 passed（12.12 秒），两文件编译及 diff 检查通过；不更改数据库/协议，无真实微信验证。
+- OPT-04：新增 `history_cache.py`、`history_summary.py`、`benchmark_history_queries.py`、`test_history_performance.py`；修改历史服务、API 和补录状态文案。使用最多16项/30秒有界缓存，DB/WAL修订失效并复制返回；新消息触发增量摘要，删除/账号回填仅重建受影响会话，汇总读取使用同一事务。首次旧库一次建立可重建摘要；新增元数据表/触发器及回填游标，不修改消息内容。读请求每批500条且不排队重复补录，页面后续轮询继续补录；导出/删除等待并补齐开始时已提交源记录。历史相关111 passed、性能回归6 passed（有重叠），Node通过。30万消息/250会话合成基准：首次3.5毫秒、缓存中位1.09毫秒、消息全量聚合0次；旧基线约4.6秒，仅为本机离线数据对比。搜索/日期首次仍查询原始消息，首次摘要迁移和真实大库体验待用户验证。
