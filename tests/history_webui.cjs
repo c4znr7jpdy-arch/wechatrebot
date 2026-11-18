@@ -59,7 +59,7 @@ function historyContext() {
     historyManualRefresh: false, historyReadyAccount: 'account-a'};
   const calls = [];
   const context = vm.createContext({state, $, Date, Map, Set, JSON, Number, String,
-    window: {setTimeout, clearTimeout},
+    window: {setTimeout, clearTimeout}, document: {visibilityState: 'visible'},
     api: async (method, id, filters) => { calls.push({method, id, filters}); return context.response(id); },
     renderConversations() {}, renderConversationHeader() {}, renderConversationInspector() {},
     bindAvatarFallbacks() {}, bindMessageSenderSelection() {}, updateSelectedSenderButtons() {},
@@ -376,6 +376,10 @@ async function unknownAccountPolling() {
   await c.pollHistory();
   assert.equal(reads, 0, 'unknown identity must not generate repeated history failures');
   s.status.runtime.account_status_available = true;
+  c.document.visibilityState = 'hidden';
+  await c.pollHistory();
+  assert.equal(reads, 0, 'hidden windows must not read history');
+  c.document.visibilityState = 'visible';
   await c.pollHistory();
   assert.equal(reads, 1, 'history polling resumes after the account probe recovers');
   s.status.runtime.account_status_available = false;

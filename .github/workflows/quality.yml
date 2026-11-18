@@ -36,12 +36,16 @@ jobs:
         run: python scripts/validate_release_metadata.py
       - name: Measure offline manager bootstrap
         run: python scripts/benchmark_manager_bootstrap.py --budget tests/fixtures/manager_bootstrap_budget.json --output artifacts/manager-bootstrap.json
+      - name: Measure offline history query budget
+        run: python scripts/benchmark_history_queries.py --rows 10000 --output artifacts/history-queries.json
       - name: Upload bootstrap performance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: manager-bootstrap-performance
-          path: artifacts/manager-bootstrap.json
+          path: |
+            artifacts/manager-bootstrap.json
+            artifacts/history-queries.json
           if-no-files-found: ignore
       - name: Install test browser
         run: python -m playwright install chromium

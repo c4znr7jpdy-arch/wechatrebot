@@ -4,6 +4,45 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
+def test_hidden_directory_polling_pauses_and_visibility_resumes(browser, manager_url):
+    page = browser.new_page()
+    try:
+        page.add_init_script("""(() => {
+          window.testPollers={};
+          const interval=window.setInterval;
+          window.setInterval=(fn,...args)=>{
+            if(['pollHistory','pollGroups'].includes(fn.name)){window.testPollers[fn.name]=fn;return 0;}
+            return fn.name==='refreshStatus'?0:interval(fn,...args);
+          };
+        })();""")
+        page.goto(manager_url)
+        expect(page.locator('#stateTitle')).to_have_text('机器人可用')
+        if page.locator('#onboardingRecommended').is_visible():
+            page.locator('#onboardingRecommended').click()
+        page.evaluate("""() => {
+          window.directoryReads=0;
+          const api=window.pywebview.api;
+          for(const name of ['get_conversations','get_groups']){
+            const original=api[name];api[name]=async(...args)=>{directoryReads++;return original(...args);};
+          }
+        }""")
+        for route, poller in [('history','pollHistory'), ('groups','pollGroups')]:
+            page.locator(f'[data-page="{route}"].nav-item').click()
+            expect(page.locator(f'#page-{route}')).to_be_visible()
+            page.wait_for_timeout(150)
+            page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'})")
+            page.evaluate("window.readsBeforeHidden=directoryReads")
+            page.evaluate("name=>testPollers[name]()", poller)
+            assert page.evaluate('directoryReads===readsBeforeHidden')
+            page.evaluate("""() => {
+              Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});
+              document.dispatchEvent(new Event('visibilitychange'));
+            }""")
+            page.wait_for_function('directoryReads>readsBeforeHidden')
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("resume", ["focus", "visibilitychange", "paired"])
 @pytest.mark.parametrize("older_page", [False, True])
 def test_resume_after_three_minutes_preserves_overlapping_message_nodes(browser, manager_url, resume, older_page):

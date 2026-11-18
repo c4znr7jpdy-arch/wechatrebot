@@ -816,7 +816,7 @@ window.createMessageHistory = function (helpers) {
   }
 
   async function pollHistory() {
-    if (state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
+    if (document.visibilityState === "hidden" || state.activePage !== "history" || state.historyPolling || state.historyLoadingOlder
         || state.historyConversationsLoading || state.historyMessagesLoading
         || !state.historyAccount || state.status?.runtime?.account_status_available === false) return;
     state.historyPolling = true;

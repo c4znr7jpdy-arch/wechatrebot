@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import csv
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from html import unescape
 import json
@@ -344,13 +344,9 @@ class ChatHistoryService:
         )
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            source = sqlite3.connect(self.legacy_path, timeout=5)
-            target = sqlite3.connect(temporary, timeout=5)
-            try:
+            with closing(sqlite3.connect(self.legacy_path, timeout=5)) as source, \
+                    closing(sqlite3.connect(temporary, timeout=5)) as target:
                 source.backup(target)
-            finally:
-                target.close()
-                source.close()
             os.replace(temporary, self.path)
         except (OSError, sqlite3.Error):
             # A damaged or locked legacy file must not prevent startup, and a
