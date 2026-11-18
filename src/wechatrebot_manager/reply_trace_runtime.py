@@ -44,7 +44,7 @@ def _state(event):
     return state
 
 
-def _emit(state, stage, phase, status, *, operation=0, started=None, duration=None):
+def _emit(state, stage, phase, status, *, operation=0, started=None, duration=None, cleanup_status=None):
     if state is None or state["sequence"] >= _MAX_EVENTS:
         return
     import json
@@ -60,6 +60,8 @@ def _emit(state, stage, phase, status, *, operation=0, started=None, duration=No
     }
     if duration is not None or started is not None:
         payload["duration_ms"] = round(max(0.0, duration if duration is not None else now - started) * 1000, 3)
+    if cleanup_status in {"failed", "cancelled"}:
+        payload["cleanup_status"] = cleanup_status
     try:
         _LOGGER.info("WRB_REPLY_TRACE %s", json.dumps(payload, separators=(",", ":")))
     except (OSError, RuntimeError):
@@ -90,6 +92,7 @@ async def trace_model_responses(event, provider, payload, *, streaming):
     operation = state["sequence"] + 1 if state is not None else 0
     _emit(state, "model", "begin", "pending", operation=operation)
     duration, status = 0.0, "success"
+    responses, primary_error, cleanup_status = None, None, None
     try:
         if not streaming:
             started = time.monotonic()
@@ -113,10 +116,24 @@ async def trace_model_responses(event, provider, payload, *, streaming):
                     status = "failed"
                 yield response
     except BaseException as exc:
+        primary_error = exc
         status = "cancelled" if isinstance(exc, (asyncio.CancelledError, GeneratorExit)) else "failed"
         raise
     finally:
-        _emit(state, "model", "end", status, operation=operation, duration=duration)
+        try:
+            close = getattr(responses, "aclose", None)
+            if callable(close):
+                await close()
+        except BaseException as exc:
+            cleanup_status = "cancelled" if isinstance(exc, (asyncio.CancelledError, GeneratorExit)) else "failed"
+            # Preserve the original provider error/cancellation. A second close
+            # failure has its own fixed enum, never private exception text.
+            if primary_error is None:
+                status = cleanup_status
+                raise
+        finally:
+            _emit(state, "model", "end", status, operation=operation,
+                  duration=duration, cleanup_status=cleanup_status)
     if not streaming:
         yield response
 

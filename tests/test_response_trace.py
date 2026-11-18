@@ -121,3 +121,19 @@ def test_chat_text_cannot_inject_structured_trace(tmp_path):
 def test_missing_or_empty_log_is_empty(tmp_path):
     assert ResponseTraceService(tmp_path).recent() == []
     assert ResponseTraceService(tmp_path).recent(0) == []
+
+
+def test_existing_service_finds_runtime_log_created_after_manager_start(tmp_path):
+    service = ResponseTraceService(tmp_path)
+    assert service.recent() == []
+    log(tmp_path, completed(FIRST), current_path=True)
+    assert service.recent()[0]["trace_id"] == FIRST
+
+
+def test_secondary_cleanup_error_is_safe_and_visible(tmp_path):
+    lines = completed(FIRST)
+    lines[3] = record(FIRST, 4, "model", "end", 10000, operation=3, duration=9000,
+                      status="failed", cleanup_status="cancelled")
+    model = next(stage for stage in log(tmp_path, lines)[0]["stages"] if stage["code"] == "model")
+    assert model["status"] == "failed" and model["cleanup_status"] == "cancelled"
+    assert model["detail"] == "模型流清理被取消"

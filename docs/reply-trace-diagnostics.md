@@ -31,3 +31,5 @@ writer 复用引擎日志及轮转，不新增数据库、后台任务或独立�
 这些检查不等同于真实微信发送验收或客户完整升级验收。
 
 2026-11-18 执行结果：`PYTHONPATH=src python -m pytest -q tests/test_reply_trace_runtime.py tests/test_response_trace.py tests/test_angel_empty_mention.py tests/test_provider_runtime_patch.py tests/test_license_runtime_patches.py tests/test_tool_reply_lifecycle.py tests/test_background_plugin_permissions.py` 为 97 passed；追加不回复决策用例后，前三个文件定向重跑为 38 passed。`python scripts/source_inputs.py` 通过，`git diff --check` 无差异格式错误。
+
+独立审查后补齐 provider 流的确定性关闭：外层关闭返回前等待底层可用的 `aclose()`；保留已有请求异常或取消，以固定 `cleanup_status` 标记二次清理失败，不输出异常文字。无 `aclose()` 的异步迭代器保持兼容。管理器每次读取动态选择实际日志路径，支持管理器先启动、引擎稍后首次创建日志。新增关闭顺序、关闭失败/取消、无关闭方法及日志延迟创建回归；两个 trace 测试文件为 31 passed。

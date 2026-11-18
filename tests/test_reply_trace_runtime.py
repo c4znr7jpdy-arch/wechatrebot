@@ -188,9 +188,14 @@ def test_closing_streaming_provider_iterator_records_cancelled_immediately(patch
     source = (patched_engine / "astrbot/core/agent/runners/tool_loop_agent_runner.py").read_text("utf-8")
     iterate = _runtime_function(source, "_iter_llm_responses", {})
 
+    closed = []
+
     async def stream(**_kwargs):
-        yield NS(role="assistant")
-        yield NS(role="assistant")
+        try:
+            yield NS(role="assistant")
+            yield NS(role="assistant")
+        finally:
+            closed.append(True)
 
     owner = NS(run_context=NS(context=NS(event=event()), messages=[]),
                _sanitize_contexts_for_provider=lambda value: value, _func_tool_for_provider=lambda: None,
@@ -202,9 +207,60 @@ def test_closing_streaming_provider_iterator_records_cancelled_immediately(patch
         responses = iterate(owner)
         await anext(responses)
         await responses.aclose()
+        assert closed == [True], "underlying provider must close before wrapper.aclose returns"
         assert records(traced)[-1]["status"] == "cancelled"
 
     asyncio.run(run())
+
+
+def test_stream_iterator_without_aclose_is_supported(traced):
+    class Responses:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    async def run():
+        return [value async for value in trace.trace_model_responses(
+            event(), NS(text_chat_stream=lambda **_: Responses()), {}, streaming=True)]
+
+    assert asyncio.run(run()) == []
+    assert records(traced)[-1]["status"] == "success"
+
+
+@pytest.mark.parametrize("close_error,expected", [(ValueError("private close failure"), "failed"), (asyncio.CancelledError(), "cancelled")])
+@pytest.mark.parametrize("primary", [None, RuntimeError("original private error"), asyncio.CancelledError()])
+def test_stream_cleanup_records_secondary_error_and_preserves_primary(traced, close_error, expected, primary):
+    class Responses:
+        closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if primary is not None:
+                raise primary
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            self.closed = True
+            raise close_error
+
+    responses = Responses()
+
+    async def run():
+        return [value async for value in trace.trace_model_responses(
+            event(), NS(text_chat_stream=lambda **_: responses), {}, streaming=True)]
+
+    error = primary if primary is not None else close_error
+    with pytest.raises(type(error)) as caught:
+        asyncio.run(run())
+    assert caught.value is error and responses.closed
+    assert records(traced)[-1]["cleanup_status"] == expected
+    assert records(traced)[-1]["status"] == (
+        "cancelled" if isinstance(error, asyncio.CancelledError) else "failed")
+    assert "private" not in traced.text.replace('"private"', '"kind"')
 
 
 @pytest.mark.parametrize("error,status", [(RuntimeError("secret"), "failed"), (asyncio.CancelledError(), "cancelled")])

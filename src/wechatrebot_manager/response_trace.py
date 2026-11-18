@@ -62,6 +62,8 @@ def _event(line: str) -> dict[str, Any] | None:
         elif (event["status"] == "pending" or not _number(event.get("duration_ms"))
               or event["duration_ms"] > event["elapsed_ms"] + 1):
             return None
+        if "cleanup_status" in event and event["cleanup_status"] not in {"failed", "cancelled"}:
+            return None
         return event
     except (ValueError, TypeError, KeyError, OverflowError):
         return None
@@ -94,6 +96,9 @@ def _project(events: list[dict[str, Any]]) -> dict[str, Any]:
             item["detail"] = "任务已取消"
         elif stage == "send" and status == "success":
             item["detail"] = "微信接口已接受；不代表对方已收到"
+        if end and end.get("cleanup_status"):
+            item["cleanup_status"] = end["cleanup_status"]
+            item["detail"] = "模型流清理失败" if end["cleanup_status"] == "failed" else "模型流清理被取消"
         if begin:
             item["offset_seconds"] = begin["elapsed_ms"] / 1000
         if begin and end and end["sequence"] > begin["sequence"] and end["elapsed_ms"] >= begin["elapsed_ms"]:
@@ -131,7 +136,12 @@ def _project(events: list[dict[str, Any]]) -> dict[str, Any]:
 class ResponseTraceService:
     def __init__(self, install_root: str | Path) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
-        self.path = next(source.path for source in log_sources(self.install_root) if source.key == "engine-runtime")
+
+    @property
+    def path(self) -> Path:
+        # The manager may precede the engine's first log creation. Resolve on
+        # each read so that a missing current log does not pin the legacy path.
+        return next(source.path for source in log_sources(self.install_root) if source.key == "engine-runtime")
 
     def recent(self, limit: int = 12) -> list[dict[str, Any]]:
         if limit <= 0:
