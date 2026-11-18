@@ -37,7 +37,7 @@
   "artifacts": {
     "sbom": {
       "path": "release/sbom.cdx.json",
-      "sha256": "0129A537190450D80D90EAFD6F2254D021DCE7020F0349074E67384E824EF001"
+      "sha256": "A9A4DF259D98C59D7A6DE6F9687F22B773F085964F41BD06928063EEA9928951"
     },
     "notices": {
       "path": "legal/THIRD-PARTY-NOTICES.md",
