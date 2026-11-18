@@ -34,7 +34,7 @@ def test_snapshot_preserves_last_state_without_probing_during_download(bridge, r
 
 
 @pytest.mark.parametrize("download_finished", [False, True])
-def test_snapshot_ignores_overlapping_probe_but_next_failure_marks_offline(
+def test_snapshot_ignores_overlap_but_next_failure_denies_only_current_query(
     bridge, caplog, download_finished,
 ):
     app, _ = bridge
@@ -49,12 +49,12 @@ def test_snapshot_ignores_overlapping_probe_but_next_failure_marks_offline(
     with caplog.at_level(logging.INFO):
         snapshot = asyncio.run(app._health_snapshot())
         assert snapshot["hook_ready"] and snapshot["wechat_identity"] == BOT
-        assert "no longer accepting" not in caplog.text
+        assert "could not be confirmed after retry" not in caplog.text
         app._active_native_downloads = 0
         app._hook_api_accepting_connections.side_effect = None
         snapshot = asyncio.run(app._health_snapshot())
-    assert not snapshot["hook_ready"] and not app._hook_ready
-    assert "no longer accepting" in caplog.text
+    assert not snapshot["hook_ready"] and app._hook_ready
+    assert "could not be confirmed after retry" in caplog.text
 
 
 def test_poll_pause_keeps_snapshots_and_resumes_real_member_changes(bridge, caplog):
