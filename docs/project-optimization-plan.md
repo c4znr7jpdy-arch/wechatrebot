@@ -109,6 +109,7 @@
 
 - CI首轮发现SBOM在Windows写入CRLF后被Git规范化为LF导致登记哈希失配；已改用固定LF计算，工作树/提交字节哈希一致，元数据复检通过。PR：https://github.com/c4znr7jpdy-arch/wechatrebot/pull/220；完整CI与合并结果由该PR留痕。
 - trace最终复查修复：日志路径每次读取解析，支持管理器先于运行日志启动；底层provider流确定性关闭；正常最终响应在yield前结束模型计时，fallback/step提前退出也关闭迭代器。使用真实runner方法和真实tenacity（test extras固定运行时9.1.4）覆盖正常/错误回退/关闭/取消/停止，最终6个定向文件97 passed。合并依赖变更时保留已有pytest/Jinja2/pytest-asyncio精确版本。
+- CI整合回归（run 44254030189）：player和frozen-manager通过；manager为6050 passed、1 failed、2 skipped，唯一失败为授权服务最小镜像未复制OPT-09新提取的模块。已在 `deploy/activation-service/Dockerfile` 补齐 `update_manifest.py`，复用已有最小镜像导入测试验证，`python -m pytest -q tests/test_admin_imports.py`：1 passed（1.12秒）；完整CI重新运行，最终状态以PR检查为准。
 
 ## 已运行的主要定向命令
 
