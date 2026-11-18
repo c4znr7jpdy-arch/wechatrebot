@@ -16,16 +16,16 @@ class _ObservedConnection:
     """Pause at SQL boundaries while still using real SQLite transactions."""
 
     def __init__(self, connection, before_execute, after_execute=None):
-        self.connection = connection
+        self.context = connection
         self.before_execute = before_execute
         self.after_execute = after_execute
 
     def __enter__(self):
-        self.connection.__enter__()
+        self.connection = self.context.__enter__()
         return self
 
     def __exit__(self, *args):
-        return self.connection.__exit__(*args)
+        return self.context.__exit__(*args)
 
     def execute(self, sql, *args):
         self.before_execute(sql)
@@ -148,7 +148,8 @@ def test_access_is_revalidated_after_waiting_for_sqlite_writer(tmp_path, monkeyp
         except ValueError as exc:
             errors.append(str(exc))
 
-    blocker = connect()
+    blocker_context = connect()
+    blocker = blocker_context.__enter__()
     # Isolate the lock wait after sync from the importer's separate transaction.
     monkeypatch.setattr(service, "sync", lambda **_kwargs: 0)
     blocker.execute("BEGIN IMMEDIATE")
@@ -159,7 +160,7 @@ def test_access_is_revalidated_after_waiting_for_sqlite_writer(tmp_path, monkeyp
         allowed[0] = False
     finally:
         blocker.rollback()
-        blocker.close()
+        blocker_context.__exit__(None, None, None)
         thread.join(5)
     assert not thread.is_alive()
     assert errors == ["account changed"]

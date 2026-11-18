@@ -21,6 +21,58 @@ def test_message_center_date_cache_and_paging_behaviour():
     assert "history date, cache, pagination, refresh and account isolation: passed" in result.stdout
 
 
+def test_directory_load_more_preserves_selection_and_filters_on_server(browser, manager_url, tmp_path):
+    page = browser.new_page(viewport={"width": 1380, "height": 860})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    try:
+        page.add_init_script("""(() => {
+          const interval = window.setInterval;
+          window.setInterval = (fn,...args) => ['pollHistory','refreshStatus'].includes(fn.name) ? 0 : interval(fn,...args);
+        })();""")
+        page.goto(manager_url)
+        expect(page.locator("#stateTitle")).to_have_text("机器人可用")
+        if page.locator("#onboardingRecommended").is_visible():
+            page.locator("#onboardingRecommended").click()
+        page.evaluate("""() => {
+          window.directoryFilters=[];
+          window.pywebview.api.get_conversations=async filters => {
+            window.directoryFilters.push(filters);
+            const all=Array.from({length:251},(_,i)=>({conversation_id:`friend-${i}`,type:i===250?'group':'private',
+              display_name:`聊天 ${i}`,message_count:1,last_timestamp:251-i}));
+            const filtered=all.filter(item=>filters.kind==='all'||item.type===filters.kind);
+            const start=filters.cursor?filtered.findIndex(item=>item.conversation_id===filters.cursor.id)+1:0;
+            const items=filtered.slice(start,start+200), more=start+items.length<filtered.length;
+            return {ok:true,data:{account_id:'wxid_demo_account',items,has_more:more,
+              next_cursor:more?{id:items.at(-1).conversation_id}:null,
+              summary:{messages:filtered.length,private_messages:250,group_messages:1}}};
+          };
+          window.pywebview.api.get_messages=async id=>({ok:true,data:{account_id:'wxid_demo_account',has_more:false,
+            items:[{id:1,timestamp:1,content:id,role:'user',sender_id:id}]}});
+        }""")
+        page.locator('[data-page="history"].nav-item').click()
+        expect(page.locator(".conversation-item")).to_have_count(200)
+        expect(page.locator("#historySummary")).to_contain_text("251 条消息")
+        page.locator('[data-more-conversations]').click()
+        expect(page.locator(".conversation-item")).to_have_count(251)
+        expect(page.locator('[data-more-conversations]')).to_have_count(0)
+        page.locator('[data-conversation="friend-249"]').click()
+        expect(page.locator("#messageList .message-bubble")).to_have_text("friend-249")
+        page.locator('#refreshHistory').click()
+        expect(page.locator(".conversation-item")).to_have_count(251)
+        expect(page.locator('[data-conversation="friend-249"]')).to_have_class("conversation-item active")
+        page.locator('#historyKinds [data-kind="group"]').click()
+        expect(page.locator(".conversation-item")).to_have_count(1)
+        page.locator('#refreshHistory').click()
+        page.wait_for_function("directoryFilters.at(-1).kind === 'group'")
+        assert page.url == manager_url and page.title()
+        assert not errors
+        page.screenshot(path=str(tmp_path / "history-directory-pagination.png"))
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("resume", ["navigation", "poll"])
 def test_unchanged_history_refresh_retains_panels_and_reading_position(
     browser, manager_url, tmp_path, resume,

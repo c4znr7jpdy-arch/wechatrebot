@@ -590,7 +590,7 @@ class ChatHistoryService:
         end_time: float | None = None,
         account_id: str = "",
         include_unassigned: bool = False,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> dict[str, Any]:
         self.sync()
         clauses: list[str] = []
@@ -646,7 +646,9 @@ class ChatHistoryService:
             LIMIT ?
         """
         total_params = tuple(params)
-        params.append(max(1, min(int(limit), 500)))
+        # The API merges the complete history summary with the live directory
+        # before paging; a missing summary must never be treated as zero history.
+        params.append(-1 if limit is None else max(1, min(int(limit), 500)))
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
             totals = connection.execute(
