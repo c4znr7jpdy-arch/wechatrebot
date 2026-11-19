@@ -334,8 +334,16 @@ def test_chat_profile_selection_preserves_scope_and_confirms_readback(browser, s
         page.close()
 
 
-def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
+def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url, tmp_path):
     page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.add_init_script("""(() => {
+      const timeout = window.setTimeout;
+      window.setTimeout = (callback, ...args) => callback.name === 'pollSelectedGroupPolicy'
+        ? 0 : timeout(callback, ...args);
+    })();""")
     try:
         page.goto(manager_url)
         expect(page.locator("#versionText")).not_to_have_text("v0.0.0")
@@ -366,16 +374,18 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
         page.evaluate("window.retainedGroupPolicyForm = document.querySelector('#groupPolicyForm')")
         page.locator('[data-chat-management-tab="private"]').click()
         page.locator('[data-chat-management-tab="groups"]').click()
-        page.wait_for_function("() => window.completedForcedGroupReads === 2")
+        expect(page.locator('#groupManagementPanel')).to_be_visible()
+        assert page.evaluate("window.completedForcedGroupReads") == 1
         assert page.evaluate("window.retainedGroupPolicyForm === document.querySelector('#groupPolicyForm')")
         page.locator('.nav-item[data-page="settings"]').click()
         page.locator('.nav-item[data-page="groups"]').click()
-        page.wait_for_function("() => window.completedForcedGroupReads === 3")
+        expect(page.locator('#groupManagementPanel')).to_be_visible()
+        assert page.evaluate("window.completedForcedGroupReads") == 1
         expect(mode).to_have_value('off')
         assert page.evaluate("window.retainedGroupPolicyForm === document.querySelector('#groupPolicyForm')")
         assert page.evaluate('window.policyReads') == 2
-        # Initial load and both returns refresh the directory without rereading rules.
-        assert page.evaluate('window.forcedGroupReads') == 3
+        # Loaded tab returns retain both the directory and each group's rules.
+        assert page.evaluate('window.forcedGroupReads') == 1
         page.locator('#refreshGroupPolicy').click()
         expect(page.locator('#modalBackdrop')).to_be_visible()
         page.locator('#modalCancel').click()
@@ -390,6 +400,9 @@ def test_group_switch_reuses_rules_and_keeps_drafts(browser, manager_url):
         expect(page.locator('#groupPolicyNote')).not_to_contain_text('未保存')
         expect(mode).to_have_value('off')
         assert page.evaluate('window.policyReads') == 3  # Save already returns the verified policy.
+        page.screenshot(path=str(tmp_path / "retained-group-rules-saved.png"), animations="disabled")
+        assert page.url == manager_url and page.title().startswith("群聊&私聊配置")
+        assert not errors, errors
     finally:
         page.close()
 

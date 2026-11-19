@@ -92,6 +92,55 @@ def test_temporary_health_failure_does_not_return_or_destroy_cached_directory(tm
     assert obj.list()["items"] == []
 
 
+@pytest.mark.parametrize("account_after", [None, "test-account", "", "different-account"],
+                         ids=["unknown", "recovered-same-account", "logout", "account-switch"])
+@pytest.mark.parametrize("operation", ["list", "members"])
+def test_bridge_account_conflict_only_discards_confirmed_changed_account(
+    tmp_path, monkeypatch, account_after, operation,
+):
+    obj, _, _ = service(tmp_path, monkeypatch)
+    original = obj.list()
+    obj._qrcodes["test@chatroom"] = (float("inf"), {"image_data_url": "cached"})
+    monkeypatch.setattr(obj, "_request", directory.GroupDirectoryService._request.__get__(obj))
+    probes = iter([
+        SimpleNamespace(status_available=True, wechat_logged_in=True, wechat_identity="test-account"),
+        SimpleNamespace(status_available=account_after is not None,
+                        wechat_logged_in=bool(account_after), wechat_identity=account_after or ""),
+    ])
+    probe_calls = []
+
+    def probe(**kwargs):
+        probe_calls.append(kwargs)
+        return next(probes)
+
+    class Opener:
+        def open(self, request, **_kwargs):
+            raise HTTPError(request.full_url, 409, "conflict", {}, BytesIO(b"{}"))
+
+    monkeypatch.setattr(directory, "probe_bridge_health", probe)
+    monkeypatch.setattr(directory, "build_opener", lambda *_args: Opener())
+    read = (lambda: obj.list(True)) if operation == "list" else (lambda: obj.members("test@chatroom"))
+
+    if account_after in {None, "test-account"}:
+        with pytest.raises(directory.GroupDirectoryUnavailable):
+            read()
+        assert obj._account == "test-account"
+        assert obj._snapshot["items"] == original["items"]
+        assert obj._snapshot["updated_at"] == original["updated_at"]
+        assert obj._qrcodes
+    else:
+        if operation == "list":
+            result = read()
+            assert result["stale"] and result["items"] == []
+        else:
+            with pytest.raises(directory.GroupDirectoryError, match="账号已变化") as caught:
+                read()
+            assert not isinstance(caught.value, directory.GroupDirectoryUnavailable)
+        assert obj._account == "" and obj._snapshot is None
+        assert not obj._qrcodes
+    assert probe_calls == [{"port": 5000}] * 2
+
+
 def test_directory_automatically_refreshes_stale_snapshot(tmp_path, monkeypatch):
     now = [100.0]
     monkeypatch.setattr(directory.time, "monotonic", lambda: now[0])

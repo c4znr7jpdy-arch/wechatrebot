@@ -465,17 +465,19 @@
       invalidateHistoryState();
       renderHistoryAccountGate(historyAccount);
       invalidateScheduledContext();
-      invalidateChatManagementContext();
       if (state.activePage === "schedules") void loadSchedules();
-      if (state.activePage === "groups" && historyAccount) {
-        if (state.chatManagementTab === "groups") void loadGroups(true);
-        else void loadContacts(false);
-      }
       if (state.activePage === "history") {
         if (historyAccount) void loadConversations({silent: true, refreshGroups: true});
       }
-    } else if (wasAccountUnavailable && accountStatusAvailable
-        && (state.activePage !== "history" || state.historyReadyAccount !== historyAccount)) {
+    }
+    // An unavailable probe is not an account change. Keep configuration drafts
+    // read-only until identity returns; confirmed logout/access loss clears them.
+    const chatAccountChanged = updateChatManagementAccount(
+      historyAccount, !accountStatusAvailable && current !== "LICENSE_PAUSED",
+    );
+    if ((chatAccountChanged && state.activePage === "groups")
+        || (wasAccountUnavailable && accountStatusAvailable
+            && (state.activePage !== "history" || state.historyReadyAccount !== historyAccount))) {
       void refreshVisibleChatData().catch(reportError);
     }
     setHistoryActionsEnabled(
@@ -760,13 +762,11 @@
     if (page === "groups") {
       if (state.chatManagementTab === "groups") {
         if (!state.groupsLoaded) await loadGroups(true);
-        else void loadGroups(true, {background: true});
         if (state.groupInspectorView === "members" && state.selectedGroup
             && !state.groupMembers[state.selectedGroup]) renderGroupInspector();
       }
       if (state.chatManagementTab === "private") {
         if (!state.contactsLoaded) await loadContacts(false);
-        else void loadContacts(true, {background: true});
       }
     }
     if (page === "history") {
@@ -825,17 +825,11 @@
     return true;
   }
 
-  async function pollGroups() {
-    if (document.visibilityState === "hidden" || state.activePage !== "groups") return;
-    if (state.chatManagementTab === "groups" && state.groupsLoaded) await loadGroups(false, {background: true});
-    if (state.chatManagementTab === "private" && state.contactsLoaded) await loadContacts(false, {background: true});
-  }
-
   async function refreshVisibleChatData() {
     if (document.visibilityState === "hidden") return;
     if (state.activePage === "groups") {
-      if (state.chatManagementTab === "groups") await loadGroups(true, {background: true});
-      else await loadContacts(true, {background: true});
+      if (state.chatManagementTab === "groups" && !state.groupsLoaded) await loadGroups(false, {background: true});
+      if (state.chatManagementTab === "private" && !state.contactsLoaded) await loadContacts(false, {background: true});
       return;
     }
     if (state.activePage === "schedules") {
@@ -1385,7 +1379,6 @@
       window.setInterval(refreshStatus, 1500);
       window.setInterval(pollUpdateStatus, 1200);
       window.setInterval(pollHistory, 1500);
-      window.setInterval(pollGroups, 15000);
       void loadRuntimeAlerts();
       window.setInterval(pollRuntimeAlerts, 15000);
       if (state.bootstrap.update?.enabled) scheduleAutomaticUpdateCheck(1800);
@@ -1447,7 +1440,7 @@
     api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
   });
 
-  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab, updateChatManagementAccount } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,
