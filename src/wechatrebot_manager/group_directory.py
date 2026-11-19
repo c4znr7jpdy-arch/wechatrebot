@@ -95,6 +95,14 @@ class GroupDirectoryService:
         with self._lock:
             clear()
 
+    def _verify_current_account(self, port: int, account: str, *, state_locked: bool) -> None:
+        after = probe_bridge_health(port=port)
+        if not getattr(after, "status_available", True) and not after.wechat_identity:
+            raise GroupDirectoryUnavailable("微信账号状态暂时不可用，请稍后重试。")
+        if not after.wechat_logged_in or after.wechat_identity != account:
+            self._clear_current_account(account, state_locked=state_locked)
+            raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
+
     def _request(
         self,
         port,
@@ -135,8 +143,10 @@ class GroupDirectoryService:
                         "自动化已暂停，群二维码暂不可用。请在运行中心点击启动机器人后重试。",
                     ) from None
             if exc.code == 409:
-                self._clear_current_account(account, state_locked=state_locked)
-                raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。") from None
+                # The bridge also returns 409 when its account probe is unavailable.
+                # Only a fresh, confirmed account change may discard this cache.
+                self._verify_current_account(port, account, state_locked=state_locked)
+                raise GroupDirectoryUnavailable("微信账号状态暂时不可用，请稍后重试。") from None
             if exc.code in {401, 403, 404, 503}:
                 raise GroupDirectoryError("群目录接口尚不可用，请确认已安装完整更新并连接微信。") from None
             raise GroupDirectoryError("群信息读取失败，旧列表未更新，请稍后重试。") from None
@@ -147,12 +157,7 @@ class GroupDirectoryService:
             raise GroupDirectoryError("未收到当前账号的群信息，请重新连接后刷新。")
         if not isinstance(data.get("items"), list):
             raise GroupDirectoryError("群信息格式不正确，请稍后重试。")
-        after = probe_bridge_health(port=port)
-        if not getattr(after, "status_available", True) and not after.wechat_identity:
-            raise GroupDirectoryUnavailable("微信账号状态暂时不可用，请稍后重试。")
-        if not after.wechat_logged_in or after.wechat_identity != account:
-            self._clear_current_account(account, state_locked=state_locked)
-            raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
+        self._verify_current_account(port, account, state_locked=state_locked)
         return data
 
     def list(self, refresh: bool = False, *, include_portraits: bool = True):
