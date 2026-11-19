@@ -280,15 +280,22 @@ def test_late_read_during_unknown_connection_cannot_replace_retained_context(his
     assert_retained_history(page)
 
 
-def test_pending_delete_confirmation_is_denied_without_clearing_retained_history(history_page):
+@pytest.mark.parametrize("operation", ["conversation", "date"])
+def test_pending_delete_confirmation_is_denied_without_clearing_retained_history(history_page, operation):
     page = history_page
     open_retained_history(page)
-    page.locator("#deleteConversation").click()
+    if operation == "date":
+        page.locator('.nav-item[data-page="settings"]').click()
+        page.locator('[data-settings-tab="system"]').click()
+        page.locator("#cleanHistory").click()
+        page.locator("#modalInput").fill("2026-11-01")
+    else:
+        page.locator("#deleteConversation").click()
     expect(page.locator("#modalBackdrop")).to_be_visible()
     page.evaluate("historyTestStatus('unknown')")
     before = page.evaluate("historyTest.calls.length")
     page.locator("#modalConfirm").click()
     page.wait_for_function("document.querySelector('#modalBackdrop').dataset.busy !== 'true'")
     assert page.evaluate("historyTest.calls.length") == before
-    assert page.evaluate("historyTest.calls.every(call => call.name !== 'delete_conversation')")
+    assert page.evaluate("historyTest.calls.every(call => !['delete_conversation', 'delete_history_before'].includes(call.name))")
     assert_retained_history(page)
