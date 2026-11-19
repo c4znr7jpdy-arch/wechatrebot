@@ -156,11 +156,16 @@ class ChatApiMixin:
                 kind in {"all", "group"}
                 and directory_account != runtime_account
             ):
+                # Directory failures can discard their cache without confirming
+                # a logout. Only the live, licensed account may change this gate.
+                current_account = self._history_data_identity()
+                if current_account == runtime_account:
+                    raise AccountStatusUnavailableError("微信账号状态暂时不可用，请稍后重试。")
                 return self._ok({
                     "items": [],
                     "summary": empty,
-                    "account_id": runtime_account,
-                    "account_changed": True,
+                    "account_id": current_account,
+                    "account_changed" if current_account else "requires_login": True,
                 })
             account_id = runtime_account
             history = self._history.conversations(

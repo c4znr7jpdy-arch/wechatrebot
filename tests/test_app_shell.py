@@ -1673,10 +1673,9 @@ def test_history_rejects_a_group_directory_from_another_robot(tmp_path: Path) ->
 
     result = api.get_conversations({"kind": "group"})
 
-    assert result["ok"] is True
-    assert result["data"]["items"] == []
-    assert result["data"]["account_id"] == "wxid_current"
-    assert result["data"]["account_changed"] is True
+    assert result["ok"] is False
+    assert result["error"]["code"] == "11007"
+    assert "data" not in result
     assert calls == []
 
 
