@@ -9,7 +9,7 @@ window.createChatManagement = function (helpers) {
     GROUP_MEMBER_COUNTS_STORAGE_PREFIX,
     GROUP_MEMBER_REQUEST_CONCURRENCY,
     GROUP_MEMBER_RETRY_DELAYS_MS,
-    api,
+    api: requestApi,
     avatarMarkup,
     bindAvatarFallbacks,
     confirmAction,
@@ -27,6 +27,17 @@ window.createChatManagement = function (helpers) {
     toast,
     updatePolicyToggle,
   } = helpers;
+
+  function canUseChatAccount() {
+    return state.status?.runtime?.account_status_available !== false && state.chatManagementAccount !== "";
+  }
+
+  // Include confirmation callbacks and profile bindings in the same guard.
+  // Keeping an old form visible must never grant access to an unknown account.
+  async function api(...args) {
+    if (!canUseChatAccount()) throw new Error("微信连接状态尚未确认，请连接恢复后重试；未保存修改已保留。");
+    return requestApi(...args);
+  }
 
   const chatProfiles = window.createChatProfiles({api, escapeHtml, confirmAction, openCoreTemplates, state});
 
@@ -72,7 +83,7 @@ window.createChatManagement = function (helpers) {
       const groupId = state.selectedGroup, account = state.groupAccount;
       const policies = state.groupPolicies;
       if (state.activePage !== "groups" || state.chatManagementTab !== "groups" || window.document?.hidden
-          || !groupId || !account || !policies[groupId]?.policy || groupPolicySaves.has(groupId)
+          || !canUseChatAccount() || !groupId || !account || !policies[groupId]?.policy || groupPolicySaves.has(groupId)
           || $("#modalBackdrop")?.hidden === false || !$("#groupPolicyForm")) return;
       const generation = chatContextGeneration;
       const result = await api("get_group_policy", account, groupId, true);
@@ -160,8 +171,8 @@ window.createChatManagement = function (helpers) {
     $("#privateManagementPanel").hidden = tab !== "private";
     $("#refreshGroups").hidden = tab !== "groups";
     $("#refreshContacts").hidden = tab !== "private";
-    if (tab === "groups") await loadGroups(true, {background: state.groupsLoaded});
-    if (tab === "private") await loadContacts(state.contactsLoaded, {background: state.contactsLoaded});
+    if (tab === "groups" && !state.groupsLoaded) await loadGroups(true);
+    if (tab === "private" && !state.contactsLoaded) await loadContacts(false);
     if (changed && state.chatManagementTab === tab) {
       window.managerMotion?.enter($(tab === "groups" ? "#groupManagementPanel" : "#privateManagementPanel"));
     }
@@ -189,15 +200,24 @@ window.createChatManagement = function (helpers) {
     clearGroupRefreshRetry();
     state.groupRefreshRetryTimer = window.setTimeout(() => {
       state.groupRefreshRetryTimer = 0;
-      if (state.activePage !== "groups" || state.chatManagementTab !== "groups") return;
+      if (state.activePage !== "groups" || state.chatManagementTab !== "groups"
+          || window.document?.hidden || !canUseChatAccount()) return;
       void loadGroups(true, {background: true, retryAttempt: retryAttempt + 1});
     }, GROUP_DIRECTORY_RETRY_DELAYS_MS[retryAttempt]);
   }
 
   function clearPendingGroupMemberLoading() {
+    let cleared = false;
     Object.entries(state.groupMembers).forEach(([groupId, memberData]) => {
-      if (memberData?.loading) delete state.groupMembers[groupId];
+      if (memberData?.loading) {
+        delete state.groupMembers[groupId];
+        cleared = true;
+      }
     });
+    if (cleared) {
+      renderGroups({preserveInspector: true});
+      if (state.groupInspectorView === "members") renderGroupInspector();
+    }
   }
 
   function invalidateChatManagementContext() {
@@ -234,8 +254,26 @@ window.createChatManagement = function (helpers) {
     renderContacts();
   }
 
+  function updateChatManagementAccount(account, unavailable) {
+    const changed = !unavailable && state.chatManagementAccount !== account;
+    if (changed) {
+      state.chatManagementAccount = account;
+      invalidateChatManagementContext();
+    }
+    const blocked = unavailable || !account;
+    if (blocked) clearGroupRefreshRetry();
+    for (const selector of ["#groupManagementPanel", "#privateManagementPanel"]) {
+      const panel = $(selector);
+      panel.inert = blocked;
+      panel.setAttribute("aria-disabled", String(blocked));
+    }
+    $("#refreshGroups").disabled = blocked || state.groupsBusy;
+    $("#refreshContacts").disabled = blocked || state.contactsBusy;
+    return changed;
+  }
+
   async function loadGroups(refresh = false, options = {}) {
-    if (state.groupsBusy || state.status?.runtime?.account_status_available === false) return;
+    if (state.groupsBusy || !canUseChatAccount()) return;
     const background = options.background === true;
     const retryAttempt = Number.isInteger(options.retryAttempt) ? options.retryAttempt : 0;
     const generation = chatContextGeneration;
@@ -334,13 +372,22 @@ window.createChatManagement = function (helpers) {
       renderGroups({preserveInspector: background});
       if (!background) reportError(error);
     } finally {
-      if (generation === chatContextGeneration) state.groupsBusy = false;
+      if (generation === chatContextGeneration) {
+        state.groupsBusy = false;
+        button.disabled = !canUseChatAccount();
+      }
       if (!background && generation === chatContextGeneration) {
-        button.disabled = false;
         button.removeAttribute("aria-busy");
         button.innerHTML = `${icon("i-refresh")}<span>刷新群列表</span>`;
       }
     }
+  }
+
+  function groupMemberCountText(group) {
+    const memberData = state.groupMembers[group.group_id];
+    const count = hasGroupMemberCount(group.member_count) ? group.member_count : memberData?.total;
+    return hasGroupMemberCount(count) ? `${count} 人`
+      : memberData?.error ? "读取失败" : memberData?.loading ? "读取中" : "待刷新";
   }
 
   function renderGroups(options = {}) {
@@ -362,12 +409,7 @@ window.createChatManagement = function (helpers) {
     $("#groupRows").innerHTML = items.length ? items.map((item) => {
       const selected = item.group_id === state.selectedGroup;
       const memberData = state.groupMembers[item.group_id];
-      const cachedCount = hasGroupMemberCount(item.member_count) ? item.member_count : memberData?.total;
-      const memberCount = hasGroupMemberCount(cachedCount)
-        ? `${escapeHtml(cachedCount)} 人`
-        : memberData?.error
-          ? '<span class="member-count-state error">读取失败</span>'
-          : '<span class="member-count-state loading">读取中</span>';
+      const memberCount = `<span class="member-count-state ${memberData?.error ? "error" : memberData?.loading ? "loading" : ""}">${escapeHtml(groupMemberCountText(item))}</span>`;
       const avatarTone = Math.abs([...String(item.group_id || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 3;
       return `<tr class="group-row ${selected ? "selected" : ""}" data-group-id="${escapeHtml(item.group_id)}" tabindex="0" aria-selected="${selected}">
         <td><span class="group-name-cell">${avatarMarkup(`group-avatar tone-${avatarTone}`, item.name || "群", item.avatar)}<span><strong class="group-name">${escapeHtml(item.name || "未命名群聊")}</strong><small class="group-list-count">${memberCount}</small></span></span></td>
@@ -385,6 +427,11 @@ window.createChatManagement = function (helpers) {
     $$(".copy-group").forEach((button) => button.addEventListener("click", () => copyText(button.dataset.groupId)));
     bindAvatarFallbacks($("#groupRows"));
     if (!options.preserveInspector || !state.selectedGroup) renderGroupInspector();
+    else {
+      const selected = state.groups.find((item) => item.group_id === state.selectedGroup);
+      const count = $("#groupInspector .inspector-id");
+      if (selected && count) count.textContent = `${selected.group_id} · ${groupMemberCountText(selected)}`;
+    }
     if (scroll) scroll.scrollTop = previousScroll;
   }
 
@@ -397,7 +444,7 @@ window.createChatManagement = function (helpers) {
   }
 
   async function loadGroupPolicy(groupId, force = false) {
-    if (!state.groupAccount || !groupId) return;
+    if (!canUseChatAccount() || !state.groupAccount || !groupId) return;
     const account = state.groupAccount;
     const policies = state.groupPolicies;
     if (policies[groupId]?.loading || (!force && policies[groupId] && !policies[groupId].error)) return;
@@ -420,7 +467,7 @@ window.createChatManagement = function (helpers) {
     const account = state.groupAccount;
     const policies = state.groupPolicies;
     const refresh = () => {
-      if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
+      if (!canUseChatAccount() || state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号尚未确认或已变化，请恢复连接后重新选择群聊。");
       delete groupDrafts[groupId]; chatProfiles.invalidate();
       return loadGroupPolicy(groupId, true);
     };
@@ -440,9 +487,7 @@ window.createChatManagement = function (helpers) {
     }
     const memberData = state.groupMembers[group.group_id];
     const policyData = groupDrafts[group.group_id] || state.groupPolicies[group.group_id];
-    const cachedCount = hasGroupMemberCount(group.member_count) ? group.member_count : memberData?.total;
-    const memberCount = hasGroupMemberCount(cachedCount) ? `${cachedCount} 人`
-      : memberData?.error ? "读取失败" : "读取中";
+    const memberCount = groupMemberCountText(group);
     const memberMarkup = !memberData ? '<div class="member-empty">点击“重新读取”后显示当前微信缓存中的成员。</div>'
       : memberData.loading ? '<div class="member-empty">正在读取成员…</div>'
       : memberData.error ? `<div class="member-empty error">${escapeHtml(memberData.error)}</div>`
@@ -536,6 +581,7 @@ window.createChatManagement = function (helpers) {
 
   async function saveGroupPolicy(event) {
     event.preventDefault();
+    if (!canUseChatAccount()) return;
     const form = event.currentTarget;
     if (!validateChatPolicyForm(form)) return;
     const button = $('button[form="groupPolicyForm"]');
@@ -560,7 +606,7 @@ window.createChatManagement = function (helpers) {
         confirmText: "保存并回读",
         intent: "primary",
         onConfirm: async () => {
-          if (state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号已变化，请重新选择群聊。");
+          if (!canUseChatAccount() || state.groupAccount !== account || state.groupPolicies !== policies) throw new Error("微信账号尚未确认或已变化，请恢复连接后重新选择群聊。");
           groupPolicySaves.add(groupId);
           let saved;
           try { saved = await api("save_group_policy", account, groupId, values, revision); }
@@ -597,6 +643,7 @@ window.createChatManagement = function (helpers) {
         if (index >= pending.length) return;
         await loadGroupMembers(pending[index], {
           generation,
+          background: options.preMarked === true,
           suppressInitialRender: options.preMarked === true,
           silentErrors: options.preMarked === true,
         });
@@ -609,8 +656,9 @@ window.createChatManagement = function (helpers) {
     while (groupMemberRequestsActive < GROUP_MEMBER_REQUEST_CONCURRENCY && groupMemberRequestQueue.length) {
       const request = groupMemberRequestQueue.shift();
       if (request.generation !== state.groupMemberLoad
+          || !canUseChatAccount()
           || !state.groups.some((item) => item.group_id === request.groupId)
-          || (request.background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) {
+          || (request.background && (window.document?.hidden || state.activePage !== "groups" || state.chatManagementTab !== "groups"))) {
         request.resolve(null);
         continue;
       }
@@ -654,8 +702,9 @@ window.createChatManagement = function (helpers) {
           await new Promise((resolve) => window.setTimeout(resolve, GROUP_MEMBER_RETRY_DELAYS_MS[attempt - 1]));
         }
         if (generation !== state.groupMemberLoad
+            || !canUseChatAccount()
             || !state.groups.some((item) => item.group_id === groupId)
-            || (background && (state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return;
+            || (background && (window.document?.hidden || state.activePage !== "groups" || state.chatManagementTab !== "groups"))) return;
         try {
           const data = await queueGroupMemberRequest(groupId, generation, background);
           if (!data) return;
@@ -686,8 +735,14 @@ window.createChatManagement = function (helpers) {
         if (!background && !options.silentErrors) reportError(lastError);
       }
       renderGroups({preserveInspector: background});
+      if (background && state.selectedGroup === groupId && state.groupInspectorView === "members") renderGroupInspector();
     } finally {
       groupMemberLoadsInFlight.delete(requestKey);
+      if (generation === state.groupMemberLoad && state.groupMembers[groupId]?.loading) {
+        delete state.groupMembers[groupId];
+        renderGroups({preserveInspector: true});
+        if (state.selectedGroup === groupId && state.groupInspectorView === "members") renderGroupInspector();
+      }
     }
   }
 
@@ -713,7 +768,7 @@ window.createChatManagement = function (helpers) {
   }
 
   async function loadContacts(refresh = false, options = {}) {
-    if (state.contactsBusy || state.status?.runtime?.account_status_available === false) return;
+    if (state.contactsBusy || !canUseChatAccount()) return;
     const background = options.background === true;
     state.contactsBusy = true;
     const generation = ++state.contactLoad;
@@ -766,8 +821,8 @@ window.createChatManagement = function (helpers) {
     } finally {
       if (generation === state.contactLoad) {
         state.contactsBusy = false;
+        button.disabled = !canUseChatAccount();
         if (!background) {
-          button.disabled = false;
           button.removeAttribute("aria-busy");
           button.innerHTML = `${icon("i-refresh")}<span>刷新联系人</span>`;
         }
@@ -841,6 +896,7 @@ window.createChatManagement = function (helpers) {
   }
 
   async function loadContactDetail(contactId) {
+    if (!canUseChatAccount()) return;
     const account = state.contactAccount;
     const details = state.contactDetails;
     if (details[contactId]?.loading) return;
@@ -862,7 +918,7 @@ window.createChatManagement = function (helpers) {
   }
 
   async function loadPrivatePolicy(contactId, force = false) {
-    if (!state.contactAccount || !contactId) return;
+    if (!canUseChatAccount() || !state.contactAccount || !contactId) return;
     const account = state.contactAccount;
     const policies = state.privatePolicies;
     if (policies[contactId]?.loading || (!force && policies[contactId] && !policies[contactId].error)) return;
@@ -885,7 +941,7 @@ window.createChatManagement = function (helpers) {
     const account = state.contactAccount;
     const policies = state.privatePolicies;
     const refresh = () => {
-      if (state.contactAccount !== account || state.privatePolicies !== policies) throw new Error("微信账号已变化，请重新选择联系人。");
+      if (!canUseChatAccount() || state.contactAccount !== account || state.privatePolicies !== policies) throw new Error("微信账号尚未确认或已变化，请恢复连接后重新选择联系人。");
       if (privatePolicySaves.has(contactId)) throw new Error("私聊规则正在保存，请稍后重新读取。");
       delete privateDrafts[contactId];
       chatProfiles.invalidate();
@@ -967,6 +1023,7 @@ window.createChatManagement = function (helpers) {
 
   async function savePrivatePolicy(event) {
     event.preventDefault();
+    if (!canUseChatAccount()) return;
     const form = event.currentTarget;
     if (!validateChatPolicyForm(form)) return;
     const button = $('button[form="privatePolicyForm"]');
@@ -1025,5 +1082,6 @@ window.createChatManagement = function (helpers) {
     renderGroupInspector,
     renderGroups,
     selectChatManagementTab,
+    updateChatManagementAccount,
   };
 };

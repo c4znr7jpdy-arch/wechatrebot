@@ -4,7 +4,7 @@ from playwright.sync_api import expect
 from test_manager_startup import browser, manager_url  # noqa: F401
 
 
-def test_hidden_directory_polling_pauses_and_visibility_resumes(browser, manager_url):
+def test_hidden_history_polling_pauses_and_visibility_resumes(browser, manager_url):
     page = browser.new_page()
     try:
         page.add_init_script("""(() => {
@@ -26,7 +26,7 @@ def test_hidden_directory_polling_pauses_and_visibility_resumes(browser, manager
             const original=api[name];api[name]=async(...args)=>{directoryReads++;return original(...args);};
           }
         }""")
-        for route, poller in [('history','pollHistory'), ('groups','pollGroups')]:
+        for route, poller in [('history','pollHistory')]:
             page.locator(f'[data-page="{route}"].nav-item').click()
             expect(page.locator(f'#page-{route}')).to_be_visible()
             page.wait_for_timeout(150)

@@ -27,7 +27,7 @@ def test_group_member_counts_keep_bounded_retries_and_request_deduplication() ->
     assert "if (groupMemberLoadsInFlight.has(requestKey)) return;" in script
     assert "groupMemberLoadsInFlight.delete(requestKey);" in script
     assert "attempt <= GROUP_MEMBER_RETRY_DELAYS_MS.length" in script
-    assert 'background && (state.activePage !== "groups"' in script
+    assert 'background && (window.document?.hidden || state.activePage !== "groups"' in script
 
 
 def test_group_member_queue_limits_concurrency_and_discards_stale_work() -> None:

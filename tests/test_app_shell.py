@@ -2423,6 +2423,7 @@ const invalidateHistoryState = () => {};
 const renderHistoryAccountGate = () => {};
 const invalidateScheduledContext = () => {};
 const invalidateChatManagementContext = () => {};
+const updateChatManagementAccount = () => false;
 const refreshVisibleChatData = async () => {};
 const reportError = error => { throw error; };
 const setHistoryActionsEnabled = () => {};
@@ -2773,7 +2774,7 @@ def test_group_counts_hydrate_in_background_and_history_scrolls_inside_chat() ->
     assert "void hydrateGroupMemberCounts" in script
     assert "Promise.all" in script
     assert "group.member_count = count" in script
-    assert 'class="member-count-state loading">读取中' in script
+    assert 'memberData?.loading ? "读取中" : "待刷新"' in script
     assert 'content.classList.toggle("history-active", page === "history")' in script
     assert ".content-scroll.history-active { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }" in styles
     assert "#page-history.active" in styles
