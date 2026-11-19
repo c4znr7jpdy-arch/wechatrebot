@@ -4,19 +4,37 @@
 
 ## 目标与实施顺序
 
-用户认可后台准备、独立安装窗口、缩短替换并保留数据、成功后清理旧文件这四点，并要求先取消耗时的备份复制。
+用户认可后台准备、独立安装窗口、缩短替换并保留数据、成功后清理旧文件这四点。完整载荷升级仅确认一次，后续自动覆盖原目录；独立窗口只显示进度，无需“下一步”、选择目录或点击“完成”。
 
 | 优先级 | 工作 | 当前状态与验收边界 |
 | --- | --- | --- |
 | P0 | 合并重复备份，大量旧文件用同盘移动保留 | 本次实现；定向验证单一回滚责任、中断恢复、文件占用、数据漂移及旧客户端兼容 |
 | P0 | 新版窗口确认成功后清理旧文件 | 复用已有启动确认与清理提交顺序；新增测试检查确认前旧文件仍在，既有测试检查清理失败不能回滚 |
-| P1 | 将关闭后的暂存工作提前到后台，缩短替换阶段 | 待实现；现有后台下载、解包、校验已存在，需继续分离同盘暂存与提交并校验准备期间的变动 |
-| P2 | 完整更新交给可见的独立安装程序 | 待实现；消费已缓存的载荷、自动识别原目录、连续显示退出/替换/启动进度，并共用现有恢复协议 |
-| P3 | 实机安装耗时与故障验收 | 待执行；同一设备、相同旧版与新包至少三次，分别记录准备、停机至窗口可用、清理耗时 |
+| P1 | 关闭前完成同盘准备，缩短替换阶段 | 已实现；后台解包的完整载荷直接用于替换，不再复制到第二套安装暂存；替换前后复核内容、路径和准备期间变动 |
+| P2 | 完整更新交给可见的独立安装程序 | 已实现；独立更新 EXE 接管缓存载荷和原目录，显示真实阶段，自动覆盖并打开新版，共用现有恢复事务 |
+| P3 | 自动化验收与实机耗时 | 自动化已覆盖真实 Tk 窗口连续三次无点击完成、缓存重用、配置保留和故障恢复；实际完整运行时、真实微信/安全软件及耗时比例仍待实机验收 |
 
 ## 为什么先改公共事务
 
 现有 Inno 安装器通过 `native_setup.py` → `installer.py` → `payload.py::install_payload` 安装；自动更新也调用 `install_payload`。仅替换安装窗口不会消除底层复制。
+
+完整载荷自动覆盖使用已安装管理器复制出来的独立更新 EXE 作为安装入口，窗口由 `update_progress.py` 提供。它直接共用安装事务和已校验缓存，避免新增安装资产、重复下载以及另一套配置/回滚规则。Inno 继续承担首次安装，自动更新没有向导页或人工安装按钮。
+
+## 自动覆盖与窗口交接
+
+正常流程：后台下载、解包、校验 → 用户确认一次 → 独立进度窗口显示 → 校验计划并取得更新锁 → 通知旧管理器已就绪 → 停止机器人及本次连接的微信 → 发送安装许可并等待接收回执 → 关闭旧管理器 → 自动覆盖 → 打开新版管理器 → 确认窗口可用 → 清理旧文件并自动关闭安装窗口。
+
+`update_handoff.py` 的 ready/commit/committed/cancel 信号使用一次性事务编号绑定。窗口不可见、helper 提前退出、停止失败或许可没有回执时，不安排关闭旧管理器；取消信号在等待旧进程退出期间也有效。取消后确认 helper 及其文件持有者退出才允许再次安装，避免重叠事务。等待旧进程退出失败时不额外启动重复管理器。
+
+独立窗口主线程运行事件循环，安装工作线程只上报阶段和文件数。总量未知时显示活动进度；提交期间关闭按钮和 Esc 不终止文件事务。成功自动关闭，无“完成”按钮；失败展示实际原因及已完成的恢复结果，允许关闭，不重新进入安装向导。打开管理器不自动启动机器人。
+
+## 后台暂存直接用于覆盖
+
+`prepare_update` 已在旧窗口可用时把包展开到安装目录的 `updates/` 中。自动完整更新以该目录作为待提交的新文件集，`install_payload(consume_prepared=True)` 继续验证全部内容、路径、现有文件及配置保留规则，随后用同盘移动逐个替换；不再为整个载荷创建第二份暂存副本。
+
+该模式只允许完整载荷、外层持久事务和安装目录更新区内的非链接目录；普通安装、组件包、ZIP 直接安装以及旧计划保持原契约。源文件在替换前及落盘后重新核对摘要，准备后被修改会触发恢复。
+
+开始消费前保存 `payload-consumed.json`。部分消费或失败后的目录不能再作为完整候选重用；重试从保留的原 ZIP 缓存重新解包和校验。安装后的入口刷新复用内存清单，不再扫描已经被移动的来源。
 
 自动更新原先有两份旧文件副本：`updates.py` 为中断/启动失败保存一份，`install_payload` 为调用期间异常再保存一份。新实现由 `update_rollback.py` 统一负责持久回滚，通过 `before_replace(target, incoming)` 接入底层安装器，取消内部第二份备份。
 
@@ -40,6 +58,8 @@
 
 因此首次从旧管理器升级先消除一层重复复制；支持新恢复协议的管理器发起后续更新才获得移动备份收益。不能用组件版本或新 helper 版本推断旧管理器能力。旧 helper 未包含本次实现时仍按其原有流程运行。
 
+新管理器的完整更新计划同时声明 `automatic_install` 和 `consume_prepared_payload`，并复制当前管理器作为支持该协议的独立助手。只有明确声明的完整更新使用窗口交接和暂存消费，旧格式计划及组件更新仍可安装。可先以管理器增量部署这些能力，再在后续完整更新中使用，无需为升级流程本身重建运行时。
+
 ## 空间与耗时证据
 
 移动模式的预检保留下载、解包、新文件暂存、五类复制快照和 64 MiB 余量；不再额外预留两份全部旧程序文件。旧文件仍占用原有空间，成功提交后才释放。旧客户端首次升级继续采用它原有的保守空间预检；新 helper 对旧格式计划在复制前还会重新核对单份完整备份与暂存空间。
@@ -50,4 +70,14 @@
 
 本次定向命令（`PYTHONPATH=src`）为 `py -3.13 -m pytest -q tests/test_update_move_rollback.py tests/test_payload.py tests/test_updates.py tests/test_unchanged_update_targets.py tests/test_native_setup.py tests/test_update_restart_processes.py tests/test_windows_file_holders.py tests/test_installer.py tests/test_local_incremental_update.py tests/test_component_update_manifest.py`，结果 **345 passed**。改动模块的 `compileall` 与 `git diff --check` 通过；完整 CI 以 PR 检查为准。
 
-真实完整载荷升级、干净 Windows、真实微信/安全软件文件占用及具体提速比例尚未实测。后续独立安装器和后台暂存阶段需要单独实现、验证和发布，不能把本次复制减少等同于四阶段全部交付。
+剩余实现的自动化验证覆盖：窗口绘制后交接、许可回执、启动前取消、旧进程等待取消、关闭失败、helper 子进程仍存活、直接替换不重复复制、源文件漂移、失败恢复、缓存重建不联网，以及真实 Tk 窗口连续三次自动完成。窗口测试运行在独立子进程，符合冻结更新器的 Tcl 生命周期，不启动机器人。
+
+自动覆盖集成验证命令（`PYTHONPATH=src`）：
+
+```powershell
+py -3.13 -m pytest -q tests/test_automatic_update.py tests/test_update_progress.py tests/test_updates.py tests/test_update_move_rollback.py tests/test_payload.py tests/test_update_close_recovery.py tests/test_update_restart_processes.py tests/test_app_shell.py tests/test_unchanged_update_targets.py tests/test_update_cache.py tests/test_local_incremental_update.py tests/test_native_setup.py tests/test_admin_imports.py tests/test_desktop.py tests/test_cli_output.py --tb=short
+```
+
+结果 **540 passed in 37.54s**。最后补充“取消信号在末次系统进程等待内到达”的回归后，重跑 `tests/test_automatic_update.py tests/test_update_progress.py`，结果 **30 passed in 9.78s**；改动模块 `compileall` 通过。完整 CI 以 PR #221 最新提交的检查为准，前一次提交的通过结果不替代新增实现的检查。
+
+真实完整载荷升级、干净 Windows、真实微信/安全软件文件占用及具体提速比例尚未实测。当前是代码与临时夹具验收，不代表本机安装已更新或已上线。

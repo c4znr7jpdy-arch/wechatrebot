@@ -87,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     plugin_center.add_argument("feature_id", nargs="?")
     apply_update = subparsers.add_parser("apply-update", help=argparse.SUPPRESS)
     apply_update.add_argument("--plan", type=Path, required=True)
+    apply_update.add_argument("--automatic", action="store_true", help=argparse.SUPPRESS)
     uninstall = subparsers.add_parser("uninstall", help="彻底卸载软件并保留聊天记录")
     uninstall.add_argument("--install-root", type=Path, required=True)
     apply_uninstall = subparsers.add_parser(
@@ -145,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
         manager_self_test(args.output)
         return 0
     if args.command == "apply-update":
+        if args.automatic:
+            from .update_handoff import run_automatic_update
+            return run_automatic_update(args.plan)
         return apply_update_plan(args.plan)
     if args.command == "uninstall":
         return run_uninstaller(args.install_root)

@@ -591,6 +591,7 @@ def install_payload(
     verified_payload: VerifiedPayload | None = None,
     unchanged_files: Mapping[Path, str] | None = None,
     before_replace: Callable[[Path, Path | None], None] | None = None,
+    consume_prepared: bool = False,
 ) -> VerifiedPayload:
     """Install verified bytes; an optional durable owner retains/restores targets.
 
@@ -612,6 +613,20 @@ def install_payload(
         raise PayloadError("更新的未变更文件记录与载荷不匹配。")
     root = Path(install_root).expanduser().resolve()
     incremental = manifest.get("schema_version") == 2
+    if consume_prepared:
+        # Only the durable updater may consume its already extracted, same-disk
+        # full payload. Regular installs and component packages keep staging.
+        if before_replace is None or incremental or not payload_root_path.is_dir():
+            raise PayloadError("仅完整更新事务可以直接使用已准备的安装文件。")
+        try:
+            relative = payload_root_path.relative_to(root)
+            if not relative.parts or relative.parts[0] != "updates":
+                raise ValueError("outside update staging")
+            _checked_target(root, relative, allow_directory=True)
+            if payload_root_path.stat().st_dev != root.stat().st_dev:
+                raise ValueError("different volume")
+        except (OSError, ValueError) as exc:
+            raise PayloadError("已准备的安装文件必须位于安装目录的同盘更新区。") from exc
     removals = _manifest_specs(manifest)[1]
     preserve_existing_user_config = preserve_existing_user_config or incremental
     # Keep the check here as a final safety boundary for callers that bypass the
@@ -694,7 +709,7 @@ def install_payload(
                 if archive is None:
                     actual = (
                         _copy_and_hash(item.source_path, staged)
-                        if staged is not None else sha256_file(item.source_path)
+                        if staged is not None and not consume_prepared else sha256_file(item.source_path)
                     )
                 else:
                     with archive.open(item.relative_path.as_posix()) as reader:
@@ -755,9 +770,17 @@ def install_payload(
             if item.relative_path in unstaged:
                 raise PayloadError(f"未变更文件在更新期间已改变：{item.relative_path.as_posix()}")
             target.parent.mkdir(parents=True, exist_ok=True)
-            staged = _transaction_file(stage_root, index)
+            staged = item.source_path if consume_prepared else _transaction_file(stage_root, index)
+            if consume_prepared:
+                _checked_target(payload_root_path, item.relative_path)
+                # Preparation must never turn a mutable cache receipt into a
+                # byte-verification bypass, even across process handoff.
+                if sha256_file(staged) != item.sha256:
+                    raise PayloadError(f"已准备的安装文件在替换前已改变：{item.relative_path.as_posix()}")
             retain_target(target, index, staged)
             _replace_file(staged, target)
+            if consume_prepared and sha256_file(target) != item.sha256:
+                raise PayloadError(f"已准备的安装文件在替换期间已改变：{item.relative_path.as_posix()}")
             installed_files.append(item)
             if progress_callback is not None:
                 progress_callback("install", index, file_count)

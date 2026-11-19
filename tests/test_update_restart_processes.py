@@ -68,7 +68,7 @@ def _start_tree(target, marker, *, root_exits):
         cwd=target.parent, env=os.environ.copy(),
     )
     try:
-        _wait_until(marker.is_file)
+        _wait_until(lambda: marker.is_file() and marker.read_text().strip().isdigit())
         if root_exits:
             _wait_until(lambda: process.poll() is not None)
         return process
@@ -184,7 +184,7 @@ def test_job_stop_waits_for_nested_descendant_file_lock_release(tmp_path):
     )
     child_handle = None
     try:
-        _wait_until(marker.is_file)
+        _wait_until(lambda: marker.is_file() and marker.read_text().strip().isdigit())
         child_handle = _winapi.OpenProcess(0x00101001, False, int(marker.read_text()))
         with pytest.raises(PermissionError):
             target.rename(target.with_suffix(".replacement"))

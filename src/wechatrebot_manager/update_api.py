@@ -10,6 +10,7 @@ from . import __version__
 from .json_io import write_json_atomic
 from .payload import PayloadError
 from .update_cache import update_release_id
+from .update_handoff import cancel_handoff, commit_handoff, wait_for_installer
 from .updates import (
     MandatoryUpdateUnavailable,
     PreparedUpdate,
@@ -313,6 +314,7 @@ class UpdateApiMixin:
             and self._release_id(prepared.release) == self._release_id(release)
             and prepared.archive_path.is_file()
             and prepared.payload_root.is_dir()
+            and not (prepared.payload_root.parent / "payload-consumed.json").exists()
         )
 
     def _mark_update_ready(self, release: UpdateRelease) -> None:
@@ -354,6 +356,8 @@ class UpdateApiMixin:
 
     def _run_update_install(self, prepared: PreparedUpdate) -> None:
         succeeded = False
+        plan = None
+        keep_helper_guard = False
         try:
             current_version, current_build = installed_release_identity(self._install_root, __version__)
             if not is_newer_update(
@@ -365,7 +369,15 @@ class UpdateApiMixin:
             # Verify the staged files and installation baseline before closing anything.
             plan = create_update_plan(
                 prepared, self._install_root, current_version=current_version,
+                automatic_install=True,
             )
+            if getattr(plan, "automatic_install", False):
+                self._set_update_status(
+                    state="running", phase="launching", percent=100,
+                    message="正在打开自动安装进度窗口", error=None,
+                )
+                self._update_helper = launch_update_helper(plan)
+                wait_for_installer(plan.plan_path, plan.update_id, self._update_helper)
             self._set_update_status(
                 state="running", phase="stopping_services", percent=100,
                 message="正在关闭机器人程序及当前连接的微信", error=None,
@@ -386,7 +398,10 @@ class UpdateApiMixin:
                 message="正在安装更新并启动新版客户端", error=None,
             )
             try:
-                self._update_helper = launch_update_helper(plan)
+                if getattr(plan, "automatic_install", False):
+                    commit_handoff(plan.plan_path, plan.update_id, self._update_helper)
+                else:
+                    self._update_helper = launch_update_helper(plan)
             except (OSError, ValueError) as exc:
                 raise UpdateFailure(
                     "UPD-1007", str(exc),
@@ -403,6 +418,17 @@ class UpdateApiMixin:
             if succeeded:
                 self._report_update_close_failure(exc)
                 return
+            if getattr(plan, "automatic_install", False) and self._update_helper is not None:
+                try:
+                    cancel_handoff(plan.plan_path, plan.update_id, self._update_helper)
+                    # A one-file parent exiting is not proof that its child
+                    # released the helper. Reuse the verified holder guard.
+                    self._refresh_update_close_helper()
+                    keep_helper_guard = self._update_helper is not None
+                except (OSError, UpdateFailure) as cancel_error:
+                    # Until this exact helper exits, block another installer.
+                    keep_helper_guard = True
+                    exc = cancel_error
             code = "UPD-1003" if isinstance(exc, (PayloadError, UpdateError)) else "UPD-1007"
             if code == "UPD-1003":
                 self._prepared_update = None
@@ -414,7 +440,7 @@ class UpdateApiMixin:
                 message=failure["error"]["message"], error=failure["error"],
             )
         finally:
-            if not succeeded:
+            if not succeeded and not keep_helper_guard:
                 self._update_installing = False
             self._action_lock.release()
             self._update_lock.release()

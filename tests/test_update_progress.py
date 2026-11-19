@@ -1,5 +1,8 @@
 import os
 import queue
+from pathlib import Path
+import subprocess
+import sys
 import threading
 from types import SimpleNamespace
 
@@ -7,6 +10,21 @@ import pytest
 
 from wechatrebot_manager import update_progress
 from wechatrebot_manager.update_errors import UpdateFailure
+
+
+def isolated_tk_test(request) -> bool:
+    """A frozen updater has its own Tcl interpreter; reproduce that boundary."""
+    node = request.node.nodeid
+    if os.environ.get("WECHATREBOT_TK_TEST_NODE") == node:
+        return False
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", node, "--tb=short"],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "WECHATREBOT_TK_TEST_NODE": node},
+        capture_output=True, text=True, timeout=45,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return True
 
 
 class Widget:
@@ -144,7 +162,9 @@ def test_handoff_failure_never_starts_mutating_operation(monkeypatch, failure_at
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native updater UI")
-def test_real_window_maps_before_handoff_and_finishes_without_user_input(monkeypatch):
+def test_real_window_maps_before_handoff_and_finishes_without_user_input(monkeypatch, request):
+    if isolated_tk_test(request):
+        return
     import tkinter as tk
 
     root = tk.Tk()
