@@ -14,6 +14,7 @@
 - **变更文件**：`app.js`、`chat-management.js`、`index.html`、`group_directory.py`；新增 `tests/test_chat_refresh_webui.py`，更新目录、导航、队列和 shell 回归；本节记录设计与验收。
 - **已执行验证**：目录/私聊/配置/shell/连接相关 269 项通过；刷新、恢复及 tab 保留 24 项通过；绑定、规则校验、群保存回执、私聊保存和启动页面 67 项通过（各批次存在重叠，不累加）。最终刷新/确认框/队列回归 20 项、取消人数读取 1 项、退出及授权失效清理 2 项通过。`node tests/chat_management_webui.cjs`、JavaScript 语法、修改的 Python 文件编译及 `git diff --check` 通过。浏览器使用现有 Playwright 离线预览（Browser plugin not available），验证页面 URL/标题、非空内容、无错误覆盖和控制台错误，并检查截图；未启动机器人。
 - **验收边界**：本机真实微信长时间连接和已安装客户端体验待维护者验证；GitHub 完整 CI、合并及交付以本次 PR/发布记录为准，离线预览通过不代表已更新本机或线上。
+- **CI 跟进**：PR #223 首轮 run `44475984374` 为 6,133 passed、3 failed、2 skipped；冻结管理器和播放器通过。失败为旧刷新次数约定、旧人数模板的静态断言，以及订阅测试抽取 `renderStatus` 后缺失新的 controller 替身。同步三个夹具，保留草稿、保存及授权断言；shell/订阅定向 222 项通过，配置切换单例通过后重新提交 CI，完整结果见 PR 检查。
 
 ## 实施顺序与状态
 
