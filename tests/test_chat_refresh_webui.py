@@ -278,3 +278,65 @@ def test_background_member_count_does_not_replace_selected_rule_form(chat_page):
     assert page.evaluate("chatTest.retainedInput === document.activeElement")
     expect(page.locator(f'{form} [name="daily_limit"]')).to_have_value("17")
     expect(page.locator(f'{form} details:has([name="daily_limit"])')).to_have_attribute("open", "")
+
+
+@pytest.mark.parametrize("kind,operation", [("groups", "policy"), ("groups", "binding"), ("private", "binding")])
+def test_open_confirmation_rechecks_unknown_account_before_writing(chat_page, tmp_path, kind, operation):
+    page = chat_page
+    template = page.evaluate("""async () => {
+      const result = await window.pywebview.api.request_robot_core('POST', 'profiles/create', {name: '确认期间保留的方案'});
+      return result.data.id;
+    }""") if operation == "binding" else None
+    open_chat(page, kind)
+    form = edit_rule(page, kind)
+    if operation == "policy":
+        page.locator('button[form="groupPolicyForm"]').click()
+    else:
+        select = page.locator("#privateChatProfile select" if kind == "private" else "#groupChatProfile select")
+        expect(select).to_be_enabled()
+        select.select_option(template)
+    expect(page.locator("#modalBackdrop")).to_be_visible()
+    page.evaluate("chatTestStatus('unknown')")
+    before = page.evaluate("chatTest.calls.length")
+    page.locator("#modalConfirm").click()
+    expect(page.locator("#modalError")).to_be_visible()
+    expect(page.locator("#modalConfirm")).to_be_enabled()
+    assert page.evaluate("chatTest.calls.length") == before, "A confirmation opened while online must recheck the account before any read/write"
+    assert page.evaluate("chatTest.calls.filter(call => call.name === 'save_group_policy' || (call.name === 'request_robot_core' && call.args[1] === 'bindings/set')).length") == 0
+    page.screenshot(path=str(tmp_path / f"confirmation-blocked-{kind}-{operation}.png"), animations="disabled")
+    page.locator("#modalCancel").click()
+    page.evaluate("chatTestStatus('online')")
+    expect(page.locator(f'{form} [name="daily_limit"]')).to_have_value("17")
+
+
+@pytest.mark.parametrize("kind", ["groups", "private"])
+def test_binding_read_cannot_write_if_identity_becomes_unknown_during_confirmation(chat_page, tmp_path, kind):
+    page = chat_page
+    template = page.evaluate("""async () => {
+      const result = await window.pywebview.api.request_robot_core('POST', 'profiles/create', {name: '异步确认方案'});
+      return result.data.id;
+    }""")
+    open_chat(page, kind)
+    edit_rule(page, kind)
+    select = page.locator("#privateChatProfile select" if kind == "private" else "#groupChatProfile select")
+    expect(select).to_be_enabled()
+    select.select_option(template)
+    expect(page.locator("#modalBackdrop")).to_be_visible()
+    page.evaluate("""() => {
+      const original = window.pywebview.api.request_robot_core;
+      window.pywebview.api.request_robot_core = async (...args) => {
+        if (args[0] === 'GET' && args[1] === 'profiles') {
+          await new Promise(resolve => { chatTest.finishBindingRead = resolve; });
+        }
+        return original(...args);
+      };
+    }""")
+    page.locator("#modalConfirm").click()
+    page.wait_for_function("typeof chatTest.finishBindingRead === 'function'")
+    page.evaluate("chatTestStatus('unknown')")
+    page.evaluate("chatTest.finishBindingRead()")
+    expect(page.locator("#modalError")).to_be_visible()
+    expect(page.locator("#modalConfirm")).to_be_enabled()
+    assert page.evaluate("chatTest.calls.filter(call => call.name === 'request_robot_core' && call.args[1] === 'bindings/set').length") == 0
+    page.screenshot(path=str(tmp_path / f"binding-read-blocked-{kind}.png"), animations="disabled")
+    page.locator("#modalCancel").click()
