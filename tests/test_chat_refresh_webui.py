@@ -340,3 +340,44 @@ def test_binding_read_cannot_write_if_identity_becomes_unknown_during_confirmati
     assert page.evaluate("chatTest.calls.filter(call => call.name === 'request_robot_core' && call.args[1] === 'bindings/set').length") == 0
     page.screenshot(path=str(tmp_path / f"binding-read-blocked-{kind}.png"), animations="disabled")
     page.locator("#modalCancel").click()
+
+
+def test_leaving_cancels_member_count_without_stale_loading_or_lost_draft(chat_page, tmp_path):
+    page = chat_page
+    page.evaluate("chatTest.missingCount = true")
+    open_chat(page, "groups")
+    page.wait_for_function("typeof chatTest.finishMembers === 'function'")
+    form = edit_rule(page, "groups")
+    row = page.locator('#groupRows .group-row[data-group-id="81263495012@chatroom"]')
+    expect(row).to_contain_text("读取中")
+    page.evaluate("""() => {
+      chatTest.retainedForm = document.querySelector('#groupPolicyForm');
+      chatTest.oldMembersReply = chatTest.finishMembers;
+    }""")
+    before = directory_calls(page)
+    page.locator('.nav-item[data-page="home"]').click()
+    page.locator('.nav-item[data-page="groups"]').click()
+    expect(row).to_contain_text("待刷新")
+    expect(row).not_to_contain_text("读取中")
+    assert directory_calls(page) == before, "Returning to cached groups must not restart directory reads"
+    assert page.evaluate("chatTest.retainedForm.isConnected")
+    expect(page.locator(f'{form} [name="daily_limit"]')).to_have_value("17")
+    expect(page.locator(f'{form} details:has([name="daily_limit"])')).to_have_attribute("open", "")
+    page.evaluate("""async () => {
+      chatTest.oldMembersReply();
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      delete chatTest.finishMembers;
+    }""")
+    expect(row).to_contain_text("待刷新")
+    expect(row).not_to_contain_text("23 人")
+    assert directory_calls(page) == before
+    assert page.evaluate("chatTest.retainedForm.isConnected")
+    page.screenshot(path=str(tmp_path / "member-count-cancelled.png"), animations="disabled")
+    page.locator("#refreshGroups").click()
+    page.wait_for_function("typeof chatTest.finishMembers === 'function'")
+    assert len(directory_calls(page)) == len(before) + 1
+    page.evaluate("chatTest.finishMembers()")
+    expect(row).to_contain_text("23 人")
+    expect(page.locator(f'{form} [name="daily_limit"]')).to_have_value("17")
+    page.screenshot(path=str(tmp_path / "member-count-manually-restored.png"), animations="disabled")
