@@ -36,7 +36,7 @@ def test_chat_configuration_keeps_paging_and_unsaved_form(browser, manager_url, 
         page.evaluate("window.retainedGroupRow = document.querySelector('#groupRows').firstElementChild")
         before_groups = page.evaluate("window.directoryReads.groups")
         page.evaluate("window.dispatchEvent(new Event('focus'))")
-        page.wait_for_function("count => window.directoryReads.groups > count", arg=before_groups)
+        assert page.evaluate("window.directoryReads.groups") == before_groups
         assert page.evaluate("window.retainedGroupRow === document.querySelector('#groupRows').firstElementChild")
 
         page.locator("#privateManagementTab").click()
@@ -54,6 +54,7 @@ def test_chat_configuration_keeps_paging_and_unsaved_form(browser, manager_url, 
           document.querySelector('.contact-table-scroll').scrollTop = 180;
           window.retainedContactScroll = document.querySelector('.contact-table-scroll').scrollTop;
           window.retainedPrivateForm = document.querySelector('#privatePolicyForm');
+          window.contactReadsBeforeResume = window.directoryReads.contacts;
           window.deferContactRefresh = true;
         }""")
         if resume == "navigation":
@@ -61,6 +62,9 @@ def test_chat_configuration_keeps_paging_and_unsaved_form(browser, manager_url, 
             page.locator('.nav-item[data-page="groups"]').click()
         else:
             page.evaluate("window.dispatchEvent(new Event('focus'))")
+        assert page.evaluate("window.directoryReads.contacts === window.contactReadsBeforeResume")
+        assert page.evaluate("window.retainedPrivateForm === document.querySelector('#privatePolicyForm')")
+        page.locator("#refreshContacts").click()
         page.wait_for_function("() => typeof window.finishContactRefresh === 'function'")
         assert page.evaluate("window.retainedPrivateForm === document.querySelector('#privatePolicyForm')")
         page.evaluate("window.deferContactRefresh = false; window.finishContactRefresh()")

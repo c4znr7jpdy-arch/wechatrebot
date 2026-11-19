@@ -13,6 +13,8 @@ const pending = [];
 let active = 0;
 let peak = 0;
 const context = {
+  window: {document: {hidden: false}},
+  canUseChatAccount: () => true,
   state: {groupMemberLoad: 1, groups: ids.map(group_id => ({group_id})), activePage: "groups", chatManagementTab: "groups"},
   api: (_method, groupId) => {
     calls.push(groupId);

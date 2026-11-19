@@ -262,6 +262,25 @@ def test_verified_account_switch_rejects_old_directory_response(chat_page):
     expect(page.locator("#privatePolicyForm")).to_have_count(0)
 
 
+@pytest.mark.parametrize("phase", ["logout", "revoked"])
+def test_verified_logout_or_access_loss_clears_retained_chat_data(chat_page, phase):
+    page = chat_page
+    open_chat(page, "groups")
+    edit_rule(page, "groups")
+    page.locator("#privateManagementTab").click()
+    expect(page.locator("#contactRows .contact-row")).to_have_count(2)
+    edit_rule(page, "private")
+    page.evaluate("chatTest.oldForms = [...document.querySelectorAll('#groupPolicyForm, #privatePolicyForm')]")
+    before = directory_calls(page)
+    page.evaluate("phase => chatTestStatus(phase)", phase)
+    expect(page.locator("#groupRows .group-row")).to_have_count(0)
+    expect(page.locator("#contactRows .contact-row")).to_have_count(0)
+    assert page.evaluate("chatTest.oldForms.every(form => !form.isConnected)")
+    assert page.evaluate("['groupManagementPanel', 'privateManagementPanel'].every(id => document.getElementById(id).inert)")
+    page.evaluate("chatTestResume()")
+    assert directory_calls(page) == before
+
+
 def test_background_member_count_does_not_replace_selected_rule_form(chat_page):
     page = chat_page
     page.evaluate("chatTest.missingCount = true")
