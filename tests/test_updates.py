@@ -575,7 +575,10 @@ def test_full_update_snapshot_omits_only_actual_unchanged_files(tmp_path):
         verified_payload=updates_module.verify_payload(payload),
     )
     entry = next(item for item in journal["files"] if item["path"] == "app/feature.txt")
-    assert (install / "updates/.rollback-damaged" / entry["backup"]).read_bytes() == b"damaged"
+    assert entry["sha256"] == sha256_file(install / "app/feature.txt")
+    assert entry["backup_mode"] == "move"
+    assert not (install / "updates/.rollback-damaged" / entry["backup"]).exists()
+    assert (install / "app/feature.txt").read_bytes() == b"damaged"
     assert journal["unchanged_files"] == {}
 
 
@@ -1119,7 +1122,7 @@ def test_insufficient_disk_space_fails_before_network_request(
     assert called is False
 
 
-def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
+def test_disk_space_preflight_counts_staging_and_only_copied_recovery_entries(
     monkeypatch, tmp_path: Path
 ) -> None:
     release = UpdateRelease(
@@ -1133,29 +1136,26 @@ def test_disk_space_preflight_accounts_for_install_staging_and_both_rollbacks(
         False,
         uncompressed_size=100,
     )
-    measured = []
-    def estimate(_root, payload):
-        measured.append(payload)
-        return 50
-    monkeypatch.setattr(updates_module, "_estimated_rollback_bytes", estimate)
+    (tmp_path / "manager").mkdir()
+    (tmp_path / "manager/WeChatReBot.exe").write_bytes(b"x" * 50)
+    (tmp_path / "runtime").mkdir()
+    (tmp_path / "runtime/old.dat").write_bytes(b"x" * 5000)
     reserve = 64 * 1024**2
     monkeypatch.setattr(
         updates_module.shutil,
         "disk_usage",
-        lambda _path: SimpleNamespace(free=10 + 2 * 100 + 2 * 50 + reserve, total=0, used=0),
+        lambda _path: SimpleNamespace(free=10 + 2 * 100 + 50 + reserve, total=0, used=0),
     )
 
     updates_module._ensure_update_disk_space(tmp_path, release)
-    assert not measured
 
     monkeypatch.setattr(
         updates_module.shutil,
         "disk_usage",
-        lambda _path: SimpleNamespace(free=100 + 2 * 50 + reserve - 1, total=0, used=0),
+        lambda _path: SimpleNamespace(free=100 + 50 + reserve - 1, total=0, used=0),
     )
     with pytest.raises(UpdateFailure) as error:
-        updates_module._ensure_update_disk_space(tmp_path, release, staged=True, payload_root=tmp_path / "payload")
-    assert measured == [tmp_path / "payload"]
+        updates_module._ensure_update_disk_space(tmp_path, release, staged=True)
     assert error.value.definition.code == "UPD-1004"
 
 

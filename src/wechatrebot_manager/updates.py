@@ -28,18 +28,17 @@ from packaging.version import InvalidVersion, Version
 from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
 from .payload import (
+    COPY_BACKUP_PATHS,
     PayloadError,
-    VerifiedPayload,
     _checked_target,
-    _is_user_config,
     _read_installed_manifest_for_merge,
+    _replace_file,
     _valid_digest,
     install_payload,
     installed_payload_fingerprint,
     payload_relative_paths,
-    payload_removed_paths,
     payload_requires_runtime_stop,
-    sha256_file,
+    sha256_file as sha256_file,  # Retain the existing caller/test import surface.
     validate_incremental_base,
     verify_payload,
 )
@@ -52,6 +51,12 @@ from .update_cache import (
 )
 from .update_errors import UpdateFailure
 from .update_logger import UpdateLogger
+from .update_rollback import (
+    UpdateFileBackup,
+    restore_update_targets as _restore_update_targets,
+    snapshot_update_targets as _snapshot_update_targets,
+    update_target_paths as _update_target_paths,
+)
 # Re-export manifest contracts for existing callers; installation I/O stays here.
 from .update_manifest import (
     PRODUCT_ID as PRODUCT_ID,
@@ -410,19 +415,6 @@ def extract_update_archive(
     return payload_root
 
 
-def _is_preserved_user_config(relative: Path) -> bool:
-    return _is_user_config(relative)
-
-
-def _update_target_paths(payload_root: Path) -> set[Path]:
-    paths = set(payload_relative_paths(payload_root))
-    paths.update(payload_removed_paths(payload_root))
-    if Path("manager/WeChatReBot.exe") in paths:
-        paths.update({Path("启动机器人.exe"), Path("卸载机器人.exe")})
-    paths.update({Path(INSTALL_MARKER), Path("config/installed-payload.json")})
-    return paths
-
-
 def _validate_update_baseline(payload_root: Path, install_root: Path) -> None:
     validate_incremental_base(payload_root, install_root)
 
@@ -517,84 +509,29 @@ def assert_update_runtime_stopped(
         )
 
 
-def _estimated_rollback_bytes(
-    install_root: Path, payload_root: Path | None = None
-) -> int:
-    """Estimate the files the helper must retain to make rollback possible."""
-    if payload_root is not None:
-        return sum(
-            (install_root / relative).stat().st_size
-            for relative in _update_target_paths(payload_root)
-            if not _is_preserved_user_config(relative)
-            and (install_root / relative).is_file()
-            and not (install_root / relative).is_symlink()
-        )
-    manifest_path = install_root / "config" / "installed-payload.json"
-    try:
-        manifest = _read_json_object(manifest_path)
-    except UpdateError:
-        manifest = {}
-    entries = manifest.get("files", [])
-    total = 0
-    seen: set[str] = set()
-    if isinstance(entries, list):
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            try:
-                relative = Path(*PurePosixPath(str(entry.get("path") or "")).parts)
-                key = relative.as_posix().casefold()
-                candidate = (install_root / relative).resolve()
-                candidate.relative_to(install_root)
-            except (OSError, ValueError):
-                continue
-            if key in seen or _is_preserved_user_config(relative):
-                continue
-            seen.add(key)
-            try:
-                if candidate.is_file() and not candidate.is_symlink():
-                    total += candidate.stat().st_size
-            except OSError:
-                continue
-    for relative in (
-        Path("config/installed-payload.json"),
-        Path(INSTALL_MARKER),
-        Path("卸载机器人.exe"),
-    ):
-        try:
-            candidate = install_root / relative
-            if candidate.is_file() and not candidate.is_symlink():
-                total += candidate.stat().st_size
-        except OSError:
-            continue
-    return total
-
-
 def _ensure_update_disk_space(
     install_root: Path,
     release: UpdateRelease,
     *,
     uncompressed_size: int | None = None,
     staged: bool = False,
-    payload_root: Path | None = None,
 ) -> None:
     expanded = uncompressed_size or release.uncompressed_size
     if not expanded:
         expanded = max(release.package_size * 4, 64 * 1024**2)
-    rollback = (
-        _estimated_rollback_bytes(install_root, payload_root)
-        if payload_root is not None
-        else 0
+    # Runtime/app originals are renamed on the same volume, without allocating
+    # another copy. Only launch/recovery entries and control files retain copies.
+    copied_backups = sum(
+        target.stat().st_size
+        for relative in COPY_BACKUP_PATHS
+        if (target := _checked_target(install_root, relative)).is_file()
     )
-    # Before extraction the changed file set is unknown. Check download space
-    # now and the exact rollback budget below after verifying the payload, rather
-    # than stat every installed runtime file for a small component update.
-    # Before downloading, both the extracted payload and install transaction
-    # staging must fit. Once downloaded/extracted, only install staging remains
-    # to be allocated. Keep two old-file snapshots: the crash-safe outer journal
-    # and install_payload's own in-process transaction rollback.
     required = (0 if staged else release.package_size) + expanded * (1 if staged else 2)
-    required += rollback * 2 + 64 * 1024**2
+    required += copied_backups + 64 * 1024**2
+    _require_update_disk_space(install_root, required)
+
+
+def _require_update_disk_space(install_root: Path, required: int) -> None:
     try:
         free = shutil.disk_usage(install_root).free
     except OSError as exc:
@@ -711,7 +648,6 @@ def prepare_update(
             release,
             uncompressed_size=actual_uncompressed,
             staged=True,
-            payload_root=payload_root,
         )
         manager = payload_root / "manager" / "WeChatReBot.exe"
         if not manager.is_file() and verified.manifest.get("schema_version") != 2:
@@ -803,6 +739,10 @@ def create_update_plan(
             "update_id": update_id,
             "version": prepared.release.version,
             "current_version": current_version,
+            # The initiating manager implements schema 2 recovery. Old managers
+            # and local scripts omit this; the incoming helper must not infer
+            # the installed recovery capability from its own version.
+            "rollback_journal_schema": 2,
             "install_root": str(root),
             "payload_root": str(prepared.payload_root.resolve()),
             "target_executable": str(root / "manager" / "WeChatReBot.exe"),
@@ -1033,99 +973,6 @@ def _restart_manager(
     )
 
 
-def _snapshot_update_targets(
-    payload_root: Path,
-    install_root: Path,
-    rollback_root: Path,
-    *,
-    update_id: str,
-    version: str,
-    verified_payload: VerifiedPayload | None = None,
-) -> dict[str, object]:
-    paths = _update_target_paths(payload_root)
-    incoming_hashes = (
-        {item.relative_path: item.sha256 for item in verified_payload.files}
-        if verified_payload is not None else {}
-    )
-    files_root = rollback_root / "files"
-    files_root.mkdir(parents=True, exist_ok=True)
-    snapshots: list[dict[str, object]] = []
-    unchanged: dict[str, str] = {}
-    for index, relative in enumerate(sorted(paths, key=lambda item: item.as_posix().casefold())):
-        target = _checked_target(install_root, relative)
-        if (
-            _is_preserved_user_config(relative)
-            and target.is_file()
-            and not target.is_symlink()
-        ):
-            continue
-        if target.exists() and (not target.is_file() or target.is_symlink()):
-            raise UpdateError(f"更新目标不是普通文件：{relative.as_posix()}")
-        exists = target.is_file()
-        expected = incoming_hashes.get(relative)
-        if exists and expected and sha256_file(target) == expected:
-            # The installer must reject drift for these omitted backups before
-            # writing anything. Compare actual bytes, never just the inventory.
-            unchanged[relative.as_posix()] = expected
-            continue
-        backup_relative = f"files/{index:08X}" if exists else ""
-        if exists:
-            shutil.copy2(target, rollback_root / backup_relative)
-        snapshots.append(
-            {
-                "path": relative.as_posix(),
-                "existed": exists,
-                "backup": backup_relative,
-            }
-        )
-    return {
-        "schema_version": 1,
-        "update_id": update_id,
-        "version": version,
-        "state": "backed_up",
-        "rollback_root": rollback_root.relative_to(install_root).as_posix(),
-        "files": snapshots,
-        "unchanged_files": unchanged,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-
-
-def _restore_update_targets(
-    journal: dict[str, object], install_root: Path
-) -> None:
-    rollback_relative = Path(*PurePosixPath(str(journal.get("rollback_root") or "")).parts)
-    try:
-        rollback_root = _checked_target(install_root, rollback_relative, allow_directory=True)
-    except PayloadError as exc:
-        raise UpdateFailure("UPD-1010", str(exc)) from exc
-    files = journal.get("files")
-    if not isinstance(files, list):
-        raise UpdateFailure("UPD-1010", "回滚清单格式无效。")
-    failures: list[str] = []
-    for entry in reversed(files):
-        try:
-            if not isinstance(entry, dict):
-                raise OSError("回滚文件条目无效")
-            relative = Path(*PurePosixPath(str(entry.get("path") or "")).parts)
-            target = _checked_target(install_root, relative)
-            if entry.get("existed") is True:
-                backup = _checked_target(rollback_root, Path(str(entry.get("backup") or "")))
-                if not backup.is_file():
-                    raise OSError(f"回滚备份缺失：{relative.as_posix()}")
-                if target.is_file() and sha256_file(target) == sha256_file(backup):
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                staged = target.with_name(f".{target.name}.restore-{uuid.uuid4().hex}")
-                shutil.copy2(backup, staged)
-                os.replace(staged, target)
-            else:
-                target.unlink(missing_ok=True)
-        except (OSError, ValueError, PayloadError) as exc:
-            failures.append(str(exc))
-    if failures:
-        raise UpdateFailure("UPD-1010", "；".join(failures[:5]))
-
-
 def _startup_confirmed(flag_path: Path, update_id: str) -> bool:
     try:
         payload = _read_json_object(flag_path)
@@ -1280,8 +1127,22 @@ def apply_update_plan(
         _validate_update_baseline(payload_root, root)
         assert_update_runtime_stopped(payload_root, root)
         _assert_manager_executable_available(payload_root, root)
+        move_existing = (
+            type(plan.get("rollback_journal_schema")) is int
+            and plan["rollback_journal_schema"] == 2
+        )
+        if not move_existing:
+            # Legacy recovery needs complete copies. Recheck that single-copy
+            # budget before snapshotting, even for plans made by local scripts.
+            copied_bytes = sum(
+                path.stat().st_size for relative in _update_target_paths(payload_root)
+                if (path := _checked_target(root, relative)).is_file()
+            )
+            stage_bytes = sum(item.source_path.stat().st_size for item in verified.files)
+            _require_update_disk_space(root, copied_bytes + stage_bytes + 64 * 1024**2)
         rollback_root = root / "updates" / f".rollback-{update_id}"
         rollback_root.mkdir(parents=True, exist_ok=False)
+        backup_started = time.monotonic()
         journal = _snapshot_update_targets(
             payload_root,
             root,
@@ -1289,21 +1150,42 @@ def apply_update_plan(
             update_id=update_id,
             version=version,
             verified_payload=verified,
+            move_existing=move_existing,
         )
         journal_path = root / "updates" / UPDATE_JOURNAL_FILE
         write_json_atomic(journal_path, journal)
-        logger.write("backup_created", state="backed_up", version=version)
+        backup = UpdateFileBackup(journal, root)
+        logger.write(
+            "rollback_prepared", state="prepared", version=version,
+            details={
+                "seconds": round(time.monotonic() - backup_started, 3),
+                "copy_files": sum(item["existed"] and item["backup_mode"] == "copy" for item in journal["files"]),
+                "move_files": sum(item["existed"] and item["backup_mode"] == "move" for item in journal["files"]),
+                "unchanged_files": len(journal["unchanged_files"]),
+            },
+        )
+        progress_phase = ""
+        phase_started = time.monotonic()
+        logged_progress: set[tuple[str, int]] = set()
 
         def log_install_progress(phase: str, completed: int, total: int) -> None:
+            nonlocal progress_phase, phase_started
+            if phase != progress_phase:
+                progress_phase, phase_started = phase, time.monotonic()
             percent = min(100, max(0, round(completed * 100 / total))) if total else 0
-            if completed == 1 or completed == total or percent in {
-                10, 20, 30, 40, 50, 60, 70, 80, 90
-            }:
+            if completed in {1, total} or (
+                percent in {10, 20, 30, 40, 50, 60, 70, 80, 90}
+                and (phase, percent) not in logged_progress
+            ):
+                logged_progress.add((phase, percent))
                 logger.write(
                     "install_progress",
                     state=phase,
                     version=version,
-                    details={"percent": percent, "completed": completed, "total": total},
+                    details={
+                        "percent": percent, "completed": completed, "total": total,
+                        "seconds": round(time.monotonic() - phase_started, 3),
+                    },
                 )
 
         install_payload(
@@ -1313,22 +1195,26 @@ def apply_update_plan(
             preserve_existing_user_config=True,
             verified_payload=verified,
             unchanged_files={Path(path): digest for path, digest in journal["unchanged_files"].items()},
+            before_replace=backup.retain,
         )
         # Manager-only updates must also refresh the standalone uninstall
         # entrypoint.  Otherwise a customer who double-clicks the old copy
         # could still run pre-update deletion rules.
         if Path("manager/WeChatReBot.exe") in payload_relative_paths(payload_root):
-            from .installed_entries import ensure_launcher_executable
-            from .uninstaller import ensure_uninstall_executable
+            from .installed_entries import START_EXECUTABLE_NAME, ensure_launcher_executable, native_uninstaller
+            from .uninstaller import UNINSTALL_EXECUTABLE_NAME, ensure_uninstall_executable
+
+            backup.retain(root / START_EXECUTABLE_NAME, target)
 
             if not ensure_launcher_executable(root):
                 raise UpdateError("无法刷新启动程序。")
+            backup.retain(root / UNINSTALL_EXECUTABLE_NAME, None if native_uninstaller(root) else target)
             if not ensure_uninstall_executable(root):
                 raise UpdateError("无法刷新卸载程序。")
-        write_json_atomic(
-            root / INSTALL_MARKER,
-            {"schema_version": 1, "state": "ready"},
-        )
+        ready_marker = rollback_root / "ready-marker.json"
+        write_json_atomic(ready_marker, {"schema_version": 1, "state": "ready"})
+        backup.retain(root / INSTALL_MARKER, ready_marker)
+        _replace_file(ready_marker, root / INSTALL_MARKER)
         journal["state"] = "awaiting_startup"
         write_json_atomic(journal_path, journal)
         flag_path = root / "updates" / f"startup-success-{update_id}.json"
