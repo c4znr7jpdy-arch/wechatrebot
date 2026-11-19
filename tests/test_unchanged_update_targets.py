@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from wechatrebot_manager import payload, updates
+from wechatrebot_manager import payload, update_rollback, updates
 from wechatrebot_manager.update_errors import UpdateFailure
 
 
@@ -70,7 +70,7 @@ def test_install_skips_locked_identical_binary_but_updates_changed_files(tmp_pat
     progress = []
     result = payload.install_payload(source, install, progress_callback=lambda *event: progress.append(event))
 
-    assert replaced == [manager]
+    assert replaced == [manager, install / "config/installed-payload.json"]
     assert hook.read_bytes() == b"same hook"
     assert manager.read_bytes() == b"new manager"
     assert progress == [("prepare", 1, 2), ("prepare", 2, 2), ("install", 1, 2), ("install", 2, 2)]
@@ -135,7 +135,8 @@ def test_changed_files_still_replace_and_roll_back_or_preserve_recovery_material
             payload.install_payload(incoming, install)
         assert (install / "app/feature.py").read_bytes() == b"old feature"
         assert not list((install / "updates").glob(".rollback-*"))
-    assert replaced == ["app/feature.py", "manager/WeChatReBot.exe", "app/feature.py"]
+    assert replaced[0].startswith("updates/.rollback-")
+    assert replaced[1:] == ["app/feature.py", "manager/WeChatReBot.exe", "app/feature.py"]
     assert (install / HOOK).read_bytes() == b"same hook"
     assert (install / "manager/WeChatReBot.exe").read_bytes() == b"old manager"
     assert (install / "config/installed-payload.json").read_bytes() == original_manifest
@@ -251,7 +252,7 @@ def test_matching_rollback_content_cannot_bypass_link_validation(tmp_path, monke
     def forbidden_hash(_path):
         raise AssertionError("rollback links must be rejected before content comparison")
 
-    monkeypatch.setattr(updates, "sha256_file", forbidden_hash)
+    monkeypatch.setattr(update_rollback, "sha256_file", forbidden_hash)
     with pytest.raises(UpdateFailure) as error:
         updates._restore_update_targets(journal, install)
     assert error.value.definition.code == "UPD-1010"

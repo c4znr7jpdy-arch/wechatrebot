@@ -13,7 +13,7 @@ from typing import BinaryIO, Callable, Mapping
 import uuid
 import zipfile
 
-from .install_paths import validate_install_path
+from .install_paths import INSTALL_MARKER, validate_install_path
 from .json_io import write_json_atomic
 
 
@@ -30,6 +30,12 @@ USER_MANAGED_PATHS = {
     "config/manager.json",
 }
 USER_MANAGED_ROOTS = {"backups", "cache", "data", "logs", "updates"}
+# Launch/recovery entrypoints and control files must survive until an atomic
+# replacement. All other old program files can be retained by same-volume move.
+COPY_BACKUP_PATHS = frozenset({
+    Path(INSTALL_MARKER), Path("config/installed-payload.json"),
+    Path("manager/WeChatReBot.exe"), Path("启动机器人.exe"), Path("卸载机器人.exe"),
+})
 ProgressCallback = Callable[[str, int, int], None]
 
 
@@ -584,7 +590,15 @@ def install_payload(
     preserve_existing_user_config: bool = False,
     verified_payload: VerifiedPayload | None = None,
     unchanged_files: Mapping[Path, str] | None = None,
+    before_replace: Callable[[Path, Path | None], None] | None = None,
+    consume_prepared: bool = False,
 ) -> VerifiedPayload:
+    """Install verified bytes; an optional durable owner retains/restores targets.
+
+    before_replace receives the target and incoming file (None for removal)
+    immediately before each mutation. When supplied, its
+    caller owns rollback and cleanup, including exceptions from this function.
+    """
     payload_root_path, manifest, planned = (
         _reuse_verified_payload_plan(payload_root, verified_payload)
         if verified_payload is not None else _plan_payload(payload_root)
@@ -599,6 +613,20 @@ def install_payload(
         raise PayloadError("更新的未变更文件记录与载荷不匹配。")
     root = Path(install_root).expanduser().resolve()
     incremental = manifest.get("schema_version") == 2
+    if consume_prepared:
+        # Only the durable updater may consume its already extracted, same-disk
+        # full payload. Regular installs and component packages keep staging.
+        if before_replace is None or incremental or not payload_root_path.is_dir():
+            raise PayloadError("仅完整更新事务可以直接使用已准备的安装文件。")
+        try:
+            relative = payload_root_path.relative_to(root)
+            if not relative.parts or relative.parts[0] != "updates":
+                raise ValueError("outside update staging")
+            _checked_target(root, relative, allow_directory=True)
+            if payload_root_path.stat().st_dev != root.stat().st_dev:
+                raise ValueError("different volume")
+        except (OSError, ValueError) as exc:
+            raise PayloadError("已准备的安装文件必须位于安装目录的同盘更新区。") from exc
     removals = _manifest_specs(manifest)[1]
     preserve_existing_user_config = preserve_existing_user_config or incremental
     # Keep the check here as a final safety boundary for callers that bypass the
@@ -638,9 +666,28 @@ def install_payload(
     stage_root = updates_root / f".install-{transaction_id}"
     backup_root = updates_root / f".rollback-{transaction_id}"
     stage_root.mkdir(parents=True)
-    backup_root.mkdir(parents=True)
+    if before_replace is None:
+        backup_root.mkdir(parents=True)
     replaced: list[tuple[Path, Path | None]] = []
     rollback_failed = False
+
+    def retain_target(target: Path, index: int, incoming: Path | None = None) -> None:
+        if before_replace is not None:
+            before_replace(target, incoming)
+            return
+        backup = None
+        if target.exists():
+            if not target.is_file() or target.is_symlink():
+                raise PayloadError(f"安装目标不是普通文件：{target.relative_to(root).as_posix()}")
+            backup = _transaction_file(backup_root, index)
+            if target.relative_to(root) in COPY_BACKUP_PATHS:
+                shutil.copy2(target, backup)
+            else:
+                _replace_file(target, backup)
+        # Register after the move, before replacement: a failed new-file move
+        # must restore the original too. A failed backup move changed nothing.
+        replaced.append((target, backup))
+
     try:
         file_count = len(planned)
         verified_files: list[VerifiedPayloadFile] = []
@@ -662,7 +709,7 @@ def install_payload(
                 if archive is None:
                     actual = (
                         _copy_and_hash(item.source_path, staged)
-                        if staged is not None else sha256_file(item.source_path)
+                        if staged is not None and not consume_prepared else sha256_file(item.source_path)
                     )
                 else:
                     with archive.open(item.relative_path.as_posix()) as reader:
@@ -723,23 +770,25 @@ def install_payload(
             if item.relative_path in unstaged:
                 raise PayloadError(f"未变更文件在更新期间已改变：{item.relative_path.as_posix()}")
             target.parent.mkdir(parents=True, exist_ok=True)
-            backup: Path | None = None
-            if target.exists():
-                if not target.is_file() or target.is_symlink():
-                    raise PayloadError(f"安装目标不是普通文件：{item.relative_path.as_posix()}")
-                backup = _transaction_file(backup_root, index)
-                shutil.copy2(target, backup)
-            _replace_file(_transaction_file(stage_root, index), target)
-            replaced.append((target, backup))
+            staged = item.source_path if consume_prepared else _transaction_file(stage_root, index)
+            if consume_prepared:
+                _checked_target(payload_root_path, item.relative_path)
+                # Preparation must never turn a mutable cache receipt into a
+                # byte-verification bypass, even across process handoff.
+                if sha256_file(staged) != item.sha256:
+                    raise PayloadError(f"已准备的安装文件在替换前已改变：{item.relative_path.as_posix()}")
+            retain_target(target, index, staged)
+            _replace_file(staged, target)
+            if consume_prepared and sha256_file(target) != item.sha256:
+                raise PayloadError(f"已准备的安装文件在替换期间已改变：{item.relative_path.as_posix()}")
             installed_files.append(item)
             if progress_callback is not None:
                 progress_callback("install", index, file_count)
 
         for index, (relative, _digest) in enumerate(removals, start=file_count + 1):
             target = _checked_target(root, relative)
-            backup = _transaction_file(backup_root, index)
-            _replace_file(target, backup)
-            replaced.append((target, backup))
+            retain_target(target, index)
+            target.unlink(missing_ok=True)
             if progress_callback is not None:
                 progress_callback("remove", index - file_count, len(removals))
 
@@ -777,14 +826,12 @@ def install_payload(
             and previous_manifest["release_build"] >= 0
         ):
             installed_manifest["release_build"] = previous_manifest["release_build"]
-        manifest_backup: Path | None = None
-        if manifest_target.exists():
-            manifest_backup = _transaction_file(backup_root, file_count + len(removals) + 1)
-            shutil.copy2(manifest_target, manifest_backup)
-        # Register the manifest before writing so even a post-write failure
-        # restores both the program files and the exact previous inventory.
-        replaced.append((manifest_target, manifest_backup))
-        write_json_atomic(manifest_target, installed_manifest)
+        manifest_index = file_count + len(removals) + 1
+        staged_manifest = _transaction_file(stage_root, manifest_index)
+        write_json_atomic(staged_manifest, installed_manifest)
+        manifest_target.parent.mkdir(parents=True, exist_ok=True)
+        retain_target(manifest_target, manifest_index, staged_manifest)
+        _replace_file(staged_manifest, manifest_target)
     except Exception as exc:
         rollback_errors: list[str] = []
         for target, backup in reversed(replaced):
@@ -792,7 +839,8 @@ def install_payload(
                 if backup is None:
                     target.unlink(missing_ok=True)
                 elif backup.exists():
-                    _replace_file(backup, target)
+                    if not target.is_file() or sha256_file(target) != sha256_file(backup):
+                        _replace_file(backup, target)
             except OSError:
                 rollback_errors.append(str(target))
         if rollback_errors:
@@ -801,6 +849,6 @@ def install_payload(
         raise
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
-        if not rollback_failed:
+        if before_replace is None and not rollback_failed:
             shutil.rmtree(backup_root, ignore_errors=True)
     return VerifiedPayload(payload_root_path, manifest, tuple(installed_files))
