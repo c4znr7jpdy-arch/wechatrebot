@@ -71,12 +71,12 @@ function historyContext() {
       if (options.forceBottom || options.nearBottom) $('#messageList').scrollTop = 900;
     }, renderHistoryAccountGate() {},
   });
-  const names = ['requestHistoryRead', 'refreshHistoryRecords', 'loadConversations', 'canEditHistory', 'setHistoryActionsEnabled',
+  const names = ['canReadHistory', 'requestHistoryRead', 'refreshHistoryRecords', 'loadConversations', 'canEditHistory', 'setHistoryActionsEnabled',
     'historyFilters', 'pagedHistoryFilters', 'normalizeMessagePage', 'mergeMessages',
     'historyMessageCacheKey', 'getHistoryMessageCacheEntry', 'setHistoryMessageCacheEntry',
     'saveSelectedHistoryMessages', 'clearHistoryMessageCache', 'requestHistoryMessagePage',
     'showHistoryNewerMessages', 'messagesSignature', 'selectConversation', 'prependOlderMessages', 'loadOlderMessages',
-    'invalidateHistoryState', 'pollHistory'];
+    'suspendHistoryReads', 'invalidateHistoryState', 'pollHistory'];
   for (const name of names) {
     const start = script.search(new RegExp(`^  (?:async )?function ${name}\\(`, 'm'));
     assert.ok(start >= 0, name);

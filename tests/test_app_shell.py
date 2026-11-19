@@ -2422,6 +2422,7 @@ const invalidateHistoryState = () => {};
 const renderHistoryAccountGate = () => {};
 const invalidateScheduledContext = () => {};
 const invalidateChatManagementContext = () => {};
+const suspendHistoryReads = () => {};
 const refreshVisibleChatData = async () => {};
 const reportError = error => { throw error; };
 const setHistoryActionsEnabled = () => {};
