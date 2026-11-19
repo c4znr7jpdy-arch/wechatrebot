@@ -426,6 +426,7 @@
     const active = !licenseWaiting && !["STOPPED", "ERROR"].includes(current);
     const starting = state.startPending || ["CORE_STARTING", "CORE_READY", "CONNECTION_STARTING"].includes(current);
     const accountStatusAvailable = runtime.account_status_available !== false;
+    if (!wasAccountUnavailable && !accountStatusAvailable) suspendHistoryReads();
     const wechatLoggedIn = accountStatusAvailable && Boolean(runtime.wechat_identity);
     if (!accountStatusAvailable && ((state.agentSchedules || []).length
       || $("#scheduledTaskRuns").dataset.agentAccount)) invalidateAgentSchedules();
@@ -451,7 +452,11 @@
     if (Object.hasOwn(status, "history_account")) {
       state.historyAccessAccount = String(status.history_account || "").trim();
     }
-    const historyAccount = state.historyAccessAccount === undefined
+    // A failed probe does not establish logout or account replacement. Retain
+    // the verified view while all history reads and actions are paused.
+    const historyAccount = !accountStatusAvailable && current !== "LICENSE_PAUSED"
+      ? state.historyAccount
+      : state.historyAccessAccount === undefined
       ? (accountStatusAvailable ? String(runtime.wechat_identity || "").trim() : state.historyAccount)
       : (wechatLoggedIn && String(runtime.wechat_identity).trim() === state.historyAccessAccount ? state.historyAccessAccount : "");
 
@@ -470,7 +475,9 @@
     const chatAccountChanged = updateChatManagementAccount(
       historyAccount, !accountStatusAvailable && current !== "LICENSE_PAUSED",
     );
-    if ((chatAccountChanged && state.activePage === "groups") || (wasAccountUnavailable && accountStatusAvailable)) {
+    if ((chatAccountChanged && state.activePage === "groups")
+        || (wasAccountUnavailable && accountStatusAvailable
+            && (state.activePage !== "history" || state.historyReadyAccount !== historyAccount))) {
       void refreshVisibleChatData().catch(reportError);
     }
     setHistoryActionsEnabled(
@@ -1283,7 +1290,7 @@
         confirmText: "开始清理",
         field: {label: "保留此日期及之后的记录", type: "date", value: ""},
         onConfirm: async (value) => {
-          if (!canEditHistory(accountId)) { handleHistoryActionDenied({requires_login: true}, accountId, "清理"); return; }
+          if (!canEditHistory(accountId)) { handleHistoryActionDenied(null, accountId, "清理"); return; }
           const result = await api("delete_history_before", value, accountId);
           if (handleHistoryActionDenied(result, accountId, "清理")) return;
           toast(`已清理 ${result.deleted} 条记录。 `);
@@ -1467,7 +1474,7 @@
     updatePolicyToggle: (...args) => updatePolicyToggle(...args),
   });
 
-  const { canEditHistory, handleHistoryActionDenied, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
+  const { canEditHistory, handleHistoryActionDenied, invalidateHistoryState, loadConversations, loadOlderMessages, pollHistory, refreshHistoryRecords, renderHistoryAccountGate, selectConversation, setHistoryActionsEnabled, suspendHistoryReads, updateHistoryMessageScrollPosition } = createPageController("createMessageHistory", {
     $,
     $$,
     HISTORY_MESSAGE_CACHE_LIMIT,

@@ -9,7 +9,7 @@ window.createMessageHistory = function (helpers) {
     HISTORY_MESSAGE_WINDOW_LIMIT,
     HISTORY_PAGE_SIZE,
     HISTORY_PRELOAD_THRESHOLD,
-    api,
+    api: requestApi,
     avatarMarkup,
     bindAvatarFallbacks,
     confirmAction,
@@ -22,6 +22,15 @@ window.createMessageHistory = function (helpers) {
     state,
     toast,
   } = helpers;
+
+  function canReadHistory() {
+    return Boolean(state.historyAccount && state.status?.runtime?.account_status_available !== false);
+  }
+
+  async function api(...args) {
+    if (!canReadHistory()) throw new Error("正在确认微信连接，当前聊天记录已保留，请连接恢复后重试。");
+    return requestApi(...args);
+  }
 
   async function requestHistoryRead(request) {
     let timer;
@@ -36,7 +45,7 @@ window.createMessageHistory = function (helpers) {
   }
 
   async function refreshHistoryRecords() {
-    if (!state.historyAccount || state.historyManualRefresh) return;
+    if (!canReadHistory() || state.historyManualRefresh) return;
     state.historyManualRefresh = true;
     state.historyQrCache?.clear();
     clearHistoryMessageCache();
@@ -55,6 +64,7 @@ window.createMessageHistory = function (helpers) {
   }
 
   async function loadConversations(options = {}) {
+    if (state.status?.runtime?.account_status_available === false) return;
     const silent = options?.silent === true;
     const requestAccount = state.historyAccount;
     if (!requestAccount) {
@@ -85,7 +95,7 @@ window.createMessageHistory = function (helpers) {
             account_id: requestAccount, kind, ...filters, page_size: 200, cursor,
             refresh_groups: !cursor && options?.refreshGroups === true,
           }));
-          if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
+          if (load !== state.historyLoad || requestAccount !== state.historyAccount || !canReadHistory()) return;
           if (page.requires_login || page.account_changed || page.account_id !== requestAccount) { data = page; break; }
           const merged = new Map(items.map(item => [JSON.stringify([item.type, item.conversation_id]), item]));
           for (const item of page.items || []) merged.set(JSON.stringify([item.type, item.conversation_id]), item);
@@ -95,7 +105,7 @@ window.createMessageHistory = function (helpers) {
           cursor = page.next_cursor;
         } while (items.length < desired);
       }
-      if (load !== state.historyLoad || requestAccount !== state.historyAccount) return;
+      if (load !== state.historyLoad || requestAccount !== state.historyAccount || !canReadHistory()) return;
       if (data.requires_login || data.account_changed || data.account_id !== requestAccount) {
         invalidateHistoryState();
         renderHistoryAccountGate(data.requires_login ? "" : state.historyAccount);
@@ -178,20 +188,39 @@ window.createMessageHistory = function (helpers) {
       refreshButton.disabled = !state.historyAccount || state.status?.runtime?.account_status_available === false || state.historyManualRefresh;
       refreshButton.textContent = state.historyManualRefresh ? "刷新中…" : "刷新";
     }
+    for (const selector of ["#historySearch", "#historyDateRange"]) {
+      const control = $(selector);
+      if (control) control.disabled = !canReadHistory();
+    }
+    for (const selector of ["#historyKinds", "#historySearchBox", "#historyDateDialog"]) {
+      const control = $(selector);
+      if (control) control.inert = !canReadHistory();
+    }
   }
 
-  function invalidateHistoryState() {
-    clearHistoryMessageCache();
-    state.historyMessageDom = null;
-    state.historyKindSelections = new Map();
-    state.historyRenderedPanels?.clear();
-    state.historyQrCache?.clear();
-    window.closeMessageImagePreview?.();
+  function suspendHistoryReads() {
+    // Discard responses started before uncertainty, even if they return after
+    // the same account recovers. Keep the verified cache and DOM untouched.
+    state.historyMessageCacheEpoch += 1;
+    state.historyMessageRequests.clear();
     state.historyLoad += 1;
     state.historyConversationsLoading = false;
     state.messageLoad += 1;
     state.historyMessagesLoading = false;
     state.historyOlderLoad += 1;
+    state.historyLoadingOlder = false;
+    $("#olderMessagesStatus").hidden = true;
+    $("#messageList").removeAttribute("aria-busy");
+  }
+
+  function invalidateHistoryState() {
+    suspendHistoryReads();
+    state.historyMessageCache.clear();
+    state.historyMessageDom = null;
+    state.historyKindSelections = new Map();
+    state.historyRenderedPanels?.clear();
+    state.historyQrCache?.clear();
+    window.closeMessageImagePreview?.();
     state.conversations = [];
     state.selectedConversation = null;
     state.selectedMessages = [];
@@ -228,8 +257,11 @@ window.createMessageHistory = function (helpers) {
   }
 
   function handleHistoryActionDenied(result, accountId, action) {
-    const denied = result?.requires_login || result?.account_changed;
-    if (!denied && accountId === state.historyAccount) return false;
+    if (!result && accountId === state.historyAccount && !canReadHistory()) {
+      throw new Error(`正在确认微信连接，本次${action}未执行，当前聊天记录已保留。`);
+    }
+    const denied = !result || result.requires_login || result.account_changed;
+    if (!denied && accountId === state.historyAccount) return !canReadHistory();
     invalidateHistoryState();
     state.historyActionNotice = {
       title: "请检查微信登录与授权",
@@ -661,6 +693,7 @@ window.createMessageHistory = function (helpers) {
   }
 
   async function selectConversation(conversationId, options = {}) {
+    if (!canReadHistory()) return;
     const item = state.conversations.find((value) => value.conversation_id === conversationId);
     if (!item) return;
     const silent = options?.silent === true;
@@ -721,7 +754,7 @@ window.createMessageHistory = function (helpers) {
     const filters = pagedHistoryFilters();
     try {
       const page = await requestHistoryMessagePage(key, conversationId, filters);
-      if (requestAccount !== state.historyAccount || cacheEpoch !== state.historyMessageCacheEpoch) return;
+      if (requestAccount !== state.historyAccount || cacheEpoch !== state.historyMessageCacheEpoch || !canReadHistory()) return;
       if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
         invalidateHistoryState();
         renderHistoryAccountGate(page.requires_login ? "" : state.historyAccount);
@@ -772,7 +805,7 @@ window.createMessageHistory = function (helpers) {
         renderConversationInspector(item);
       }
     } catch (error) {
-      if (changed && !cacheEntry && load === state.messageLoad && requestAccount === state.historyAccount
+      if (canReadHistory() && changed && !cacheEntry && load === state.messageLoad && requestAccount === state.historyAccount
           && state.selectedConversation?.conversation_id === conversationId) {
         list.removeAttribute("aria-busy");
         list.innerHTML = '<div class="empty-state compact"><h2>暂时无法读取消息</h2><p>请点击刷新重试。</p></div>';
@@ -787,6 +820,7 @@ window.createMessageHistory = function (helpers) {
   }
 
   async function loadOlderMessages() {
+    if (!canReadHistory()) return;
     const list = $("#messageList");
     const selected = state.selectedConversation;
     const oldest = state.selectedMessages[0];
@@ -802,7 +836,8 @@ window.createMessageHistory = function (helpers) {
     }, 300);
     try {
       const page = normalizeMessagePage(await requestHistoryRead(api("get_messages", selected.conversation_id, pagedHistoryFilters(oldest))));
-      if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || requestAccount !== state.historyAccount || state.selectedConversation?.conversation_id !== selected.conversation_id) return;
+      if (request !== state.historyOlderLoad || messageGeneration !== state.messageLoad || requestAccount !== state.historyAccount
+          || state.selectedConversation?.conversation_id !== selected.conversation_id || !canReadHistory()) return;
       if (page.requires_login || page.account_changed || page.account_id !== requestAccount) {
         invalidateHistoryState();
         renderHistoryAccountGate(page.requires_login ? "" : state.historyAccount);
@@ -941,7 +976,7 @@ window.createMessageHistory = function (helpers) {
       confirmAction({
         title: "删除这段聊天记录？", message: "仅删除管理软件中的本机副本，不会影响微信原始聊天，也不会损伤机器人的记忆数据。", confirmText: "删除记录",
         onConfirm: async () => {
-          if (!canEditHistory(accountId)) { handleHistoryActionDenied({requires_login: true}, accountId, "删除"); return; }
+          if (!canEditHistory(accountId)) { handleHistoryActionDenied(null, accountId, "删除"); return; }
           const result = await api("delete_conversation", item.conversation_id, accountId);
           if (handleHistoryActionDenied(result, accountId, "删除")) return;
           clearHistoryMessageCache();
@@ -974,6 +1009,7 @@ window.createMessageHistory = function (helpers) {
     renderHistoryAccountGate,
     selectConversation,
     setHistoryActionsEnabled,
+    suspendHistoryReads,
     updateHistoryMessageScrollPosition,
   };
 };
