@@ -44,7 +44,7 @@ def history_page(browser, manager_url, tmp_path):
         page.evaluate("""group => {
           const api = window.pywebview.api, readStatus = api.get_status;
           window.historyTest = {account: 'wxid_demo_account', phase: 'online', group,
-            calls: [], hold: '', finishRead: null};
+            calls: [], hold: '', finishRead: null, lateDenied: false, hasOlder: false};
           api.get_status = async () => {
             const response = structuredClone(await readStatus()), status = response.data;
             const unknown = historyTest.phase === 'unknown';
@@ -75,6 +75,7 @@ def history_page(browser, manager_url, tmp_path):
               summary: {messages: items.length * 60, group_messages: items.length * 60}}};
             if (historyTest.hold === 'get_conversations') {
               return new Promise(resolve => { historyTest.finishRead = () => {
+                if (historyTest.lateDenied) { resolve({ok: true, data: {account_id: '', requires_login: true, items: []}}); return; }
                 result.data.items = [{...items[0], conversation_id: 'late_response@chatroom', display_name: '迟到目录不可覆盖'}];
                 resolve(result);
               }; });
@@ -83,12 +84,14 @@ def history_page(browser, manager_url, tmp_path):
           };
           api.get_messages = async (id, filters) => {
             historyTest.calls.push({name: 'get_messages', args: structuredClone([id, filters])});
-            const result = {ok: true, data: {account_id: filters.account_id, has_more: false,
-              items: Array.from({length: 60}, (_, index) => ({id: index + 1, timestamp: 1795000000 + index,
-                content: `${id} 保留消息 ${index + 1}`, role: 'user',
+            const offset = historyTest.hasOlder ? 60 : 0;
+            const result = {ok: true, data: {account_id: filters.account_id, has_more: historyTest.hasOlder,
+              items: Array.from({length: 60}, (_, index) => ({id: offset + index + 1, timestamp: 1795000000 + offset + index,
+                content: `${id} 保留消息 ${offset + index + 1}`, role: 'user',
                 sender_id: index % 2 ? 'member_b' : 'member_a', sender_name: index % 2 ? '另一位成员' : '选中的成员'}))}};
             if (historyTest.hold === 'get_messages') {
               return new Promise(resolve => { historyTest.finishRead = () => {
+                if (historyTest.lateDenied) { resolve({ok: true, data: {account_id: '', requires_login: true, items: []}}); return; }
                 result.data.items = [{id: 999, timestamp: 1795000099, content: '迟到消息不可覆盖', role: 'user', sender_id: 'late'}];
                 resolve(result);
               }; });
@@ -145,7 +148,7 @@ def open_retained_history(page, *, filters=False):
     expect(page.locator("#conversationHeader")).to_contain_text(GROUP)
     expect(page.locator("#messageList article")).to_have_count(60)
     page.wait_for_function("!historyTestState.historyMessagesLoading && !historyTestState.historyConversationsLoading")
-    page.locator("#messageList .message-avatar-button").first.click()
+    page.locator("#messageList .message-avatar-button").nth(58).click()
     expect(page.locator("#conversationInspector .current-sender")).to_contain_text("选中的成员")
     page.evaluate("""() => {
       const messages = document.querySelector('#messageList'), directory = document.querySelector('#conversationList');
@@ -257,17 +260,24 @@ def test_unknown_account_blocks_ui_actions_and_public_history_read_entries(histo
 
 
 @pytest.mark.parametrize("method", ["get_conversations", "get_messages"])
-def test_late_read_during_unknown_connection_cannot_replace_retained_context(history_page, method):
+@pytest.mark.parametrize("returns_after_recovery", [False, True])
+@pytest.mark.parametrize("late_denied", [False, True])
+def test_late_read_during_unknown_connection_cannot_replace_retained_context(
+    history_page, method, returns_after_recovery, late_denied,
+):
     page = history_page
     open_retained_history(page)
-    page.evaluate("""method => {
+    page.evaluate("""([method, denied]) => {
       historyTest.hold = method;
+      historyTest.lateDenied = denied;
       historyTest.pendingRead = method === 'get_conversations'
         ? historyTestController.loadConversations({silent: true})
         : historyTestController.selectConversation(historyTest.group, {silent: true, forceRefresh: true});
-    }""", method)
+    }""", [method, late_denied])
     page.wait_for_function("typeof historyTest.finishRead === 'function'")
     page.evaluate("historyTestStatus('unknown')")
+    if returns_after_recovery:
+        page.evaluate("historyTestStatus('online')")
     page.evaluate("""async () => {
       historyTest.hold = '';
       historyTest.finishRead();
@@ -275,9 +285,36 @@ def test_late_read_during_unknown_connection_cannot_replace_retained_context(his
     }""")
     assert_retained_history(page)
     expect(page.locator("#page-history")).not_to_contain_text("迟到")
-    page.evaluate("historyTestStatus('online')")
+    if not returns_after_recovery:
+        page.evaluate("historyTestStatus('online')")
     page.evaluate("historyTestSettled()")
     assert_retained_history(page)
+
+
+def test_late_older_page_denial_after_same_account_recovery_keeps_reading_window(history_page):
+    page = history_page
+    page.evaluate("historyTest.hasOlder = true")
+    open_retained_history(page)
+    page.evaluate("""() => {
+      historyTest.hold = 'get_messages';
+      historyTest.lateDenied = true;
+      const list = document.querySelector('#messageList');
+      list.scrollTop = 0;
+      historyTest.retained.messageScroll = list.scrollTop;
+      list.dispatchEvent(new Event('scroll'));
+    }""")
+    page.wait_for_function("typeof historyTest.finishRead === 'function'")
+    assert page.evaluate("historyTest.calls.at(-1).args[1].before.id") == 61
+    page.evaluate("historyTestStatus('unknown')")
+    page.evaluate("historyTestStatus('online')")
+    page.evaluate("""async () => {
+      historyTest.hold = '';
+      historyTest.finishRead();
+      await historyTestSettled();
+    }""")
+    expect(page.locator("#olderMessagesStatus")).to_be_hidden()
+    assert_retained_history(page)
+    expect(page.locator("#messageList article")).to_have_count(60)
 
 
 @pytest.mark.parametrize("operation", ["conversation", "date"])
@@ -298,4 +335,9 @@ def test_pending_delete_confirmation_is_denied_without_clearing_retained_history
     page.wait_for_function("document.querySelector('#modalBackdrop').dataset.busy !== 'true'")
     assert page.evaluate("historyTest.calls.length") == before
     assert page.evaluate("historyTest.calls.every(call => !['delete_conversation', 'delete_history_before'].includes(call.name))")
+    if operation == "date":
+        if page.locator("#modalBackdrop").is_visible():
+            page.locator("#modalCancel").click()
+        page.locator('.nav-item[data-page="history"]').click()
+        assert page.evaluate("historyTest.calls.length") == before
     assert_retained_history(page)
