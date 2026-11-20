@@ -290,6 +290,7 @@ def test_graph_maintenance_failure_waits_before_switching(failover_module, tmp_p
 
 
 def test_archived_restore_retries_after_rollback_before_provider_switch(failover_module, patched_plugin, tmp_path):
+    pytest.importorskip("numpy")
     from contextlib import asynccontextmanager
     import json
     from types import MethodType
