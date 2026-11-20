@@ -75,8 +75,11 @@ window.createChatManagement = function (helpers) {
   }
 
   function syncGroupPolicyPolling() {
-    stopGroupPolicyPolling();
-    if (!groupPolicyPollBusy && shouldPollGroupPolicy()) {
+    if (groupPolicyPollBusy || !shouldPollGroupPolicy()) {
+      stopGroupPolicyPolling();
+      return;
+    }
+    if (!groupPolicyPollTimer) {
       groupPolicyPollTimer = window.setTimeout(pollSelectedGroupPolicy, 4000);
     }
   }

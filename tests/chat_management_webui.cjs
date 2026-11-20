@@ -263,10 +263,17 @@ async function groupPolicyPollingStopsOutsidePolicyTab() {
     openCoreTemplates() {},
   });
 
-  // Active groups policy tab schedules a single pollSelectedGroupPolicy timer.
+  // Active groups policy tab schedules a single pollSelectedGroupPolicy timer
+  // and repeated sync calls must not reset or starve the countdown.
   controller.syncGroupPolicyPolling();
   assert.strictEqual(activeTimers.size, 1);
+  assert.strictEqual(scheduled.length, 1);
   assert.strictEqual(scheduled[0].callback.name, 'pollSelectedGroupPolicy');
+  const firstTimerId = scheduled[0].id;
+  controller.syncGroupPolicyPolling();
+  assert.strictEqual(activeTimers.size, 1);
+  assert.strictEqual(scheduled.length, 1);
+  assert.strictEqual(activeTimers.has(firstTimerId), true);
 
   // Switching away to private tab cancels the timer and schedules nothing new.
   controller.selectChatManagementTab('private');
