@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from wechatrebot_manager import engine_api, plugin_center, plugin_center_web
+from wechatrebot_manager import customer_config, engine_api, plugin_center, plugin_center_web
 
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.plugin_center import (
@@ -2113,7 +2113,7 @@ def test_plugin_page_upload_forwards_large_audio_to_the_selected_feature() -> No
 
 
 def test_has_visible_features_checks_manifest_without_full_catalog(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install = tmp_path / "empty_install"
     wechat = tmp_path / "Weixin.exe"
@@ -2131,6 +2131,9 @@ def test_has_visible_features_checks_manifest_without_full_catalog(
     configured_root = tmp_path / "configured"
     configured_root.mkdir()
     configured_install, _ = _install(configured_root)
+    monkeypatch.setattr(
+        customer_config, "_object", lambda _path: pytest.fail("read engine settings")
+    )
     assert PluginCenterService(configured_install).has_visible_features() is True
 
 

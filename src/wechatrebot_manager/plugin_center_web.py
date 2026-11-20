@@ -43,6 +43,57 @@ _MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 _MAX_MEME_PACK_UPLOAD_BYTES = 120 * 1024 * 1024
 
 
+_SHARED_STATIC_ASSETS: dict[str, tuple[str, str]] = {
+    "/theme-tokens.css": ("theme-tokens.css", "text/css; charset=utf-8"),
+    "/feature-page-theme.js": ("feature-page-theme.js", "text/javascript; charset=utf-8"),
+    "/feature-page-overrides.css": ("feature-page-overrides.css", "text/css; charset=utf-8"),
+    "/design-overrides.css": ("design-overrides.css", "text/css; charset=utf-8"),
+    "/provider-settings.css": ("provider-settings.css", "text/css; charset=utf-8"),
+    "/assets/AlimamaShuHeiTi-Bold.woff2": ("assets/AlimamaShuHeiTi-Bold.woff2", "font/woff2"),
+    "/assets/AlibabaPuHuiTi2-Regular.woff2": ("assets/AlibabaPuHuiTi2-Regular.woff2", "font/woff2"),
+    "/assets/AlibabaPuHuiTi2-Bold.woff2": ("assets/AlibabaPuHuiTi2-Bold.woff2", "font/woff2"),
+}
+
+
+_MANAGER_WEB_ASSETS: frozenset[str] = frozenset({
+    "/app.css",
+    "/app.js",
+    "/tab-motion.js",
+    "/scheduled-tasks.js",
+    "/model-services.js",
+    "/chat-management.js",
+    "/chat-profiles.js",
+    "/contact-profile.js",
+    "/settings-layout.css",
+    "/message-history.js",
+    "/features.js",
+    "/preview.js",
+    "/updates.js",
+    "/updates.css",
+    "/settings.js",
+    "/activity.js",
+    "/activity-errors.js",
+    "/activity.css",
+    "/runtime-alerts.js",
+    "/runtime-alerts.css",
+    "/core-settings.js",
+    "/date-range.js",
+    "/report-preview.js",
+    "/panel-layout.js",
+    "/subscription.js",
+    "/subscription.css",
+    "/soft-theme.js",
+})
+
+
+_ASSET_CONTENT_TYPES: dict[str, str] = {
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
+
+
 _LOCAL_UI_CONTENT_SECURITY_POLICY = (
     "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; "
     "script-src 'self'; connect-src 'self'; frame-src 'self'"
@@ -312,51 +363,12 @@ def _handler(
                 if split.path in {"/", "/index.html"}:
                     self._serve_asset("index.html", "text/html; charset=utf-8")
                     return
-                if split.path in {
-                    "/theme-tokens.css",
-                    "/feature-page-theme.js",
-                    "/feature-page-overrides.css",
-                    "/design-overrides.css",
-                    "/provider-settings.css",
-                    "/assets/AlimamaShuHeiTi-Bold.woff2",
-                }:
-                    suffix = Path(split.path).suffix
-                    content_type = {
-                        ".css": "text/css; charset=utf-8",
-                        ".js": "text/javascript; charset=utf-8",
-                        ".woff2": "font/woff2",
-                    }[suffix]
-                    self._serve_asset(split.path.lstrip("/"), content_type, root=shared_assets)
+                shared_asset = _SHARED_STATIC_ASSETS.get(split.path)
+                if shared_asset is not None:
+                    asset_path, content_type = shared_asset
+                    self._serve_asset(asset_path, content_type, root=shared_assets)
                     return
-                if manager_mode and split.path in {
-                    "/app.css",
-                    "/app.js",
-                    "/tab-motion.js",
-                    "/scheduled-tasks.js",
-                    "/model-services.js",
-                    "/chat-management.js",
-                    "/chat-profiles.js",
-                    "/contact-profile.js",
-                    "/settings-layout.css",
-                    "/message-history.js",
-                    "/features.js",
-                    "/preview.js",
-                    "/updates.js",
-                    "/updates.css",
-                    "/settings.js",
-                    "/activity.js",
-                    "/activity-errors.js",
-                    "/activity.css",
-                    "/runtime-alerts.js",
-                    "/runtime-alerts.css",
-                    "/core-settings.js",
-                    "/date-range.js",
-                    "/report-preview.js",
-                    "/panel-layout.js",
-                    "/subscription.js",
-                    "/subscription.css",
-                    "/soft-theme.js",
-                }:
+                if manager_mode and split.path in _MANAGER_WEB_ASSETS:
                     content_type = "text/css" if split.path.endswith(".css") else "text/javascript"
                     self._serve_asset(split.path.lstrip("/"), f"{content_type}; charset=utf-8")
                     return
@@ -376,22 +388,10 @@ def _handler(
                 if manager_mode and split.path.startswith("/assets/"):
                     asset_name = split.path.removeprefix("/assets/")
                     if _PAGE_ID.fullmatch(asset_name):
-                        asset_types = {
-                            ".png": "image/png",
-                            ".webp": "image/webp",
-                            ".ico": "image/x-icon",
-                            ".woff2": "font/woff2",
-                        }
-                        content_type = asset_types.get(Path(asset_name).suffix.lower())
+                        content_type = _ASSET_CONTENT_TYPES.get(Path(asset_name).suffix.lower())
                         if content_type:
                             self._serve_asset(f"assets/{asset_name}", content_type)
                             return
-                if split.path in {
-                    "/assets/AlibabaPuHuiTi2-Regular.woff2",
-                    "/assets/AlibabaPuHuiTi2-Bold.woff2",
-                }:
-                    self._serve_asset(split.path.lstrip("/"), "font/woff2", root=shared_assets)
-                    return
                 if any(split.path.startswith(prefix) for prefix in _PROXY_PREFIXES):
                     self._proxy()
                     return
