@@ -45,7 +45,16 @@ class ContactDirectoryService(GroupDirectoryService):
         except GroupDirectoryError as exc:
             raise GroupDirectoryError(self._contact_message(str(exc))) from None
 
-    def _request(self, port, token, account, path, *, state_locked: bool = False):
+    def _request(
+        self,
+        port,
+        token,
+        account,
+        path,
+        *,
+        state_locked: bool = False,
+        verify_account: bool = True,
+    ):
         try:
             return super()._request(
                 port,
@@ -53,6 +62,7 @@ class ContactDirectoryService(GroupDirectoryService):
                 account,
                 path,
                 state_locked=state_locked,
+                verify_account=verify_account,
             )
         except GroupDirectoryError as exc:
             raise GroupDirectoryError(self._contact_message(str(exc))) from None
@@ -245,6 +255,7 @@ class ContactDirectoryService(GroupDirectoryService):
             port, token, account = self._connection()
             if account != self._contact_account:
                 self._reset_contact_state(account)
+            generation = self._account_generation
             now = time.monotonic()
             missing = [
                 user_id
@@ -253,6 +264,7 @@ class ContactDirectoryService(GroupDirectoryService):
                 and self._contact_retry_at.get(user_id, 0.0) <= now
             ]
 
+        received: dict[str, dict[str, object]] = {}
         for offset in range(0, len(missing), self._BATCH_SIZE):
             batch = missing[offset : offset + self._BATCH_SIZE]
             query = "&".join(f"id={quote(user_id, safe='')}" for user_id in batch)
@@ -261,25 +273,26 @@ class ContactDirectoryService(GroupDirectoryService):
                 token,
                 account,
                 f"/api/manager/contacts?{query}",
+                verify_account=offset + self._BATCH_SIZE >= len(missing),
             )
-            received = {
-                str(normalized["user_id"]): normalized
-                for item in data.get("items") or []
+            received.update(
+                (str(normalized["user_id"]), normalized)
+                for item in data["items"]
                 if (normalized := self._public_contact(item)) is not None
-            }
-            with self._lock:
-                if self._account != account:
-                    raise GroupDirectoryError("微信账号已变化，请重新刷新聊天记录。")
+            )
+
+        with self._lock:
+            if self._account != account or self._account_generation != generation:
+                raise GroupDirectoryError("微信账号已变化，请重新刷新聊天记录。")
+            if missing:
                 self._contacts.update(received)
                 self._loaded_contacts.update(received)
                 retry_at = time.monotonic() + self._RETRY_SECONDS
-                for user_id in batch:
-                    if user_id in received:
+                for user_id in missing:
+                    if user_id in self._loaded_contacts:
                         self._contact_retry_at.pop(user_id, None)
                     else:
                         self._contact_retry_at[user_id] = retry_at
-
-        with self._lock:
             return {
                 user_id: copy.deepcopy(self._contacts[user_id])
                 for user_id in requested

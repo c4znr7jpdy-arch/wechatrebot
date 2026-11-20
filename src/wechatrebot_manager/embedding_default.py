@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from .config_lock import CONFIG_FILE_LOCK
 from .json_io import write_json_atomic
 from .plugin_errors import ConfigConflictError
 
@@ -56,9 +57,10 @@ def save_embedding_default(root: str | Path, provider_id: str, client, online: b
         if state not in {"applied", "pending_enable", "pending_setup"}:
             raise ConfigConflictError("默认向量模型已提交，但未能确认生效状态，请重新读取设置。")
         return state
-    original = read_embedding_config(root)
-    updated = with_embedding_default(original, provider_id)
-    if read_embedding_config(root) != original:
-        raise ConfigConflictError("长期记忆设置已变化，请重新读取后再选择默认向量模型。")
-    write_json_atomic(embedding_config_path(root), updated)
+    with CONFIG_FILE_LOCK:
+        original = read_embedding_config(root)
+        updated = with_embedding_default(original, provider_id)
+        if read_embedding_config(root) != original:
+            raise ConfigConflictError("长期记忆设置已变化，请重新读取后再选择默认向量模型。")
+        write_json_atomic(embedding_config_path(root), updated)
     return "saved_for_start"

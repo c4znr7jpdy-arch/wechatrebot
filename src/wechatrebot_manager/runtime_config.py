@@ -5,9 +5,9 @@ import hashlib
 from pathlib import Path
 import re
 import secrets
-import threading
 
 from .brand import BrandProfile
+from .config_lock import CONFIG_FILE_LOCK
 from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
 from .json_io import write_json_atomic
 from .port_config import RuntimePorts, _load_object, load_runtime_ports
@@ -21,7 +21,6 @@ from .retired_plugins import purge_retired_plugins
 
 
 _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
-CONFIG_FILE_LOCK = threading.RLock()
 
 
 def normalize_admin_id(value: str | None) -> str | None:

@@ -17,7 +17,14 @@ import threading
 from typing import Any
 from urllib.parse import quote
 
-from .customer_config import PluginEntry, load_plugins, load_robot_settings, set_plugin_enabled
+from .config_lock import CONFIG_FILE_LOCK
+from .customer_config import (
+    PluginEntry,
+    installed_plugin_modules,
+    load_plugins,
+    load_robot_settings,
+    set_plugin_enabled,
+)
 from .engine_api import EngineApiClient as EngineApiClient
 from .feature_policy import DeliveryFeature, load_delivery_features
 from .group_analysis_settings import group_analysis_ui_schema as _group_analysis_ui_schema
@@ -88,7 +95,6 @@ from .single_instance import SingleInstanceLock
 _PUBLIC_PLUGIN_ID = re.compile(r"^feature-[a-f0-9]{16}$")
 
 
-_CONFIG_WRITE_LOCK = threading.RLock()
 _DEFAULT_ENGINE_IS_AVAILABLE = EngineApiClient.is_available
 
 
@@ -151,7 +157,7 @@ class PluginCenterService:
             return False, {}
 
     def has_visible_features(self) -> bool:
-        installed = {item.module_name for item in load_plugins(self.install_root)}
+        installed = set(installed_plugin_modules(self.install_root))
         policies = load_delivery_features(self.install_root)
         if policies is None:
             return any(name != _ANGEL_HEART_MODULE for name in installed)
@@ -528,7 +534,7 @@ class PluginCenterService:
         base_revision: str | None,
         baseline: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        with _CONFIG_WRITE_LOCK:
+        with CONFIG_FILE_LOCK:
             return self._save_locked(public_id, config, base_revision, baseline)
 
     def _save_locked(
@@ -629,7 +635,7 @@ class PluginCenterService:
             raise PluginCenterError(
                 "功能统一保持加载；请在群聊&私聊管理中按聊天取消对应功能。"
             )
-        with _CONFIG_WRITE_LOCK:
+        with CONFIG_FILE_LOCK:
             item = self._plugin(public_id)
             module_name = item.module_name
             online, live_states = self._runtime_plugin_states()

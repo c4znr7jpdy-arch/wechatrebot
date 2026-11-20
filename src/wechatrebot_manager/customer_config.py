@@ -25,7 +25,8 @@ from .provider import (
     thinking_mode_matches,
     with_thinking_mode,
 )
-from .runtime_config import CONFIG_FILE_LOCK, normalize_admin_id, normalize_admin_ids, write_runtime_configs
+from .config_lock import CONFIG_FILE_LOCK
+from .runtime_config import normalize_admin_id, normalize_admin_ids, write_runtime_configs
 
 
 _UI_PREFERENCES_LOCK = threading.Lock()
@@ -366,29 +367,30 @@ def replace_provider_references(
 ) -> tuple[str, ...]:
     if not replacement_provider_id or replacement_provider_id == provider_id:
         raise ValueError("请选择另一个已配置的模型接替当前服务。")
-    pending: list[tuple[str, Path, dict[str, Any], dict[str, Any]]] = []
-    for module_name, path, original in _provider_reference_files(
-        root, (provider_id,), strict=True
-    )[provider_id]:
-        updated, count = replace_provider_value(
-            copy.deepcopy(original), provider_id, replacement_provider_id
-        )
-        if count:
-            pending.append((module_name, path, original, updated))
+    with CONFIG_FILE_LOCK:
+        pending: list[tuple[str, Path, dict[str, Any], dict[str, Any]]] = []
+        for module_name, path, original in _provider_reference_files(
+            root, (provider_id,), strict=True
+        )[provider_id]:
+            updated, count = replace_provider_value(
+                copy.deepcopy(original), provider_id, replacement_provider_id
+            )
+            if count:
+                pending.append((module_name, path, original, updated))
 
-    written: list[tuple[Path, dict[str, Any]]] = []
-    try:
-        for _module_name, path, original, updated in pending:
-            write_json_atomic(path, updated)
-            written.append((path, original))
-    except OSError:
-        for path, original in reversed(written):
-            try:
-                write_json_atomic(path, original)
-            except OSError:
-                pass
-        raise
-    return tuple(item[0] for item in pending)
+        written: list[tuple[Path, dict[str, Any]]] = []
+        try:
+            for _module_name, path, original, updated in pending:
+                write_json_atomic(path, updated)
+                written.append((path, original))
+        except OSError:
+            for path, original in reversed(written):
+                try:
+                    write_json_atomic(path, original)
+                except OSError:
+                    pass
+            raise
+        return tuple(item[0] for item in pending)
 
 
 def load_robot_settings(root: str | Path) -> RobotSettings:
@@ -805,31 +807,38 @@ def _plugin_display_name(module_name: str) -> str:
     return value.replace("_", " ").strip().title() or "扩展功能"
 
 
+def installed_plugin_modules(install: Path) -> tuple[str, ...]:
+    plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+    if not plugin_root.is_dir():
+        return ()
+    modules: list[str] = []
+    for path in sorted(plugin_root.iterdir(), key=lambda item: item.name.casefold()):
+        if (
+            not path.is_dir()
+            or path.name.startswith((".", "__"))
+            or path.name in {"data", "logs"}
+            or path.name.endswith("_disabled")
+            or path.name in _HIDDEN_CUSTOMER_PLUGINS
+        ):
+            continue
+        modules.append(path.name)
+    return tuple(modules)
+
+
 def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
     install, _, engine_path = _paths(root)
-    plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+    modules = installed_plugin_modules(install)
     engine = _object(engine_path)
     configured = engine.get("plugin_set", ["*"])
     enabled_names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
-    entries: list[PluginEntry] = []
-    if plugin_root.is_dir():
-        for path in sorted(plugin_root.iterdir(), key=lambda item: item.name.casefold()):
-            if (
-                not path.is_dir()
-                or path.name.startswith((".", "__"))
-                or path.name in {"data", "logs"}
-                or path.name.endswith("_disabled")
-                or path.name in _HIDDEN_CUSTOMER_PLUGINS
-            ):
-                continue
-            entries.append(
-                PluginEntry(
-                    module_name=path.name,
-                    display_name=_plugin_display_name(path.name),
-                    enabled="*" in enabled_names or path.name in enabled_names,
-                )
-            )
-    return tuple(entries)
+    return tuple(
+        PluginEntry(
+            module_name=module_name,
+            display_name=_plugin_display_name(module_name),
+            enabled="*" in enabled_names or module_name in enabled_names,
+        )
+        for module_name in modules
+    )
 
 
 def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> None:
@@ -899,6 +908,7 @@ __all__ = [
     "apply_wechat_change",
     "delete_provider_profile",
     "delete_provider_thinking_preference",
+    "installed_plugin_modules",
     "load_brand_profile",
     "load_plugins",
     "load_provider_profile",

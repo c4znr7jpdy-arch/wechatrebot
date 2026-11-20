@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
+from .config_lock import CONFIG_FILE_LOCK
 from .json_io import write_json_atomic
 
 
@@ -75,7 +76,8 @@ def save_brand_profile(path: Path, profile: BrandProfile) -> None:
     errors = profile.validate()
     if errors:
         raise ValueError("；".join(errors))
-    write_json_atomic(path, profile.to_dict())
+    with CONFIG_FILE_LOCK:
+        write_json_atomic(path, profile.to_dict())
 
 
 def install_brand_profile(
@@ -87,31 +89,32 @@ def install_brand_profile(
     errors = normalized.validate()
     if errors:
         raise ValueError("；".join(errors))
-    if normalized.avatar_path:
-        source = Path(normalized.avatar_path).expanduser().resolve()
-        assets = root / "config" / "assets"
-        assets.mkdir(parents=True, exist_ok=True)
-        target = assets / f"avatar{source.suffix.casefold()}"
-        if source != target.resolve():
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=".avatar.", suffix=source.suffix.casefold(), dir=assets
+    with CONFIG_FILE_LOCK:
+        if normalized.avatar_path:
+            source = Path(normalized.avatar_path).expanduser().resolve()
+            assets = root / "config" / "assets"
+            assets.mkdir(parents=True, exist_ok=True)
+            target = assets / f"avatar{source.suffix.casefold()}"
+            if source != target.resolve():
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=".avatar.", suffix=source.suffix.casefold(), dir=assets
+                )
+                os.close(descriptor)
+                temporary = Path(temporary_name)
+                try:
+                    shutil.copy2(source, temporary)
+                    os.replace(temporary, target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            normalized = BrandProfile(
+                display_name=normalized.display_name,
+                short_name=normalized.short_name,
+                persona_name=normalized.persona_name,
+                avatar_path=str(target.resolve()),
+                welcome_text=normalized.welcome_text,
+                help_title=normalized.help_title,
+                schema_version=normalized.schema_version,
+                name_source=normalized.name_source,
             )
-            os.close(descriptor)
-            temporary = Path(temporary_name)
-            try:
-                shutil.copy2(source, temporary)
-                os.replace(temporary, target)
-            finally:
-                temporary.unlink(missing_ok=True)
-        normalized = BrandProfile(
-            display_name=normalized.display_name,
-            short_name=normalized.short_name,
-            persona_name=normalized.persona_name,
-            avatar_path=str(target.resolve()),
-            welcome_text=normalized.welcome_text,
-            help_title=normalized.help_title,
-            schema_version=normalized.schema_version,
-            name_source=normalized.name_source,
-        )
-    save_brand_profile(root / "config" / "brand.json", normalized)
-    return normalized
+        save_brand_profile(root / "config" / "brand.json", normalized)
+        return normalized

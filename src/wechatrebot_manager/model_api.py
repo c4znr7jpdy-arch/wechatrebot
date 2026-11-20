@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any
 
+from .config_lock import CONFIG_FILE_LOCK
 from .customer_config import (
     ProviderService,
     delete_provider_profile,
@@ -641,30 +642,31 @@ class ModelApiMixin:
     def _delete_default_embedding_offline(
         self, provider_id: str, replacement_id: str, modules: tuple[str, ...],
     ) -> None:
-        config_root = embedding_config_path(self._install_root).parent
-        pending = []
-        for module in modules:
-            path = config_root / f"{module}_config.json"
-            original = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
-            updated, _ = replace_provider_value(original, provider_id, replacement_id)
-            if module == EMBEDDING_MODULE:
-                updated = with_embedding_default(updated, replacement_id)
-            pending.append((path, original, updated))
-        written = []
-        try:
-            for path, original, updated in pending:
-                write_json_atomic(path, updated)
-                written.append((path, original, updated))
-            delete_provider_profile(self._install_root, provider_id)
-        except (OSError, ValueError):
-            rollback_errors = []
-            for path, original, updated in reversed(written):
-                try:
-                    if json.loads(path.read_text(encoding="utf-8-sig")) != updated:
-                        raise ValueError("模型绑定已被其他操作修改。")
-                    write_json_atomic(path, original)
-                except (OSError, ValueError) as error:
-                    rollback_errors.append(error)
-            if rollback_errors:
-                raise PluginCenterError("模型删除未完成，相关功能绑定未能完整恢复，请重新读取后核对配置。") from rollback_errors[0]
-            raise
+        with CONFIG_FILE_LOCK:
+            config_root = embedding_config_path(self._install_root).parent
+            pending = []
+            for module in modules:
+                path = config_root / f"{module}_config.json"
+                original = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
+                updated, _ = replace_provider_value(original, provider_id, replacement_id)
+                if module == EMBEDDING_MODULE:
+                    updated = with_embedding_default(updated, replacement_id)
+                pending.append((path, original, updated))
+            written = []
+            try:
+                for path, original, updated in pending:
+                    write_json_atomic(path, updated)
+                    written.append((path, original, updated))
+                delete_provider_profile(self._install_root, provider_id)
+            except (OSError, ValueError):
+                rollback_errors = []
+                for path, original, updated in reversed(written):
+                    try:
+                        if json.loads(path.read_text(encoding="utf-8-sig")) != updated:
+                            raise ValueError("模型绑定已被其他操作修改。")
+                        write_json_atomic(path, original)
+                    except (OSError, ValueError) as error:
+                        rollback_errors.append(error)
+                if rollback_errors:
+                    raise PluginCenterError("模型删除未完成，相关功能绑定未能完整恢复，请重新读取后核对配置。") from rollback_errors[0]
+                raise
