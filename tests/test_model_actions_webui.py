@@ -60,6 +60,9 @@ def test_model_action_is_visible_after_failed_list_read(browser, manager_url, tm
             page.locator("#providerModelInput").fill(model)
             page.locator("#providerApiKey").fill("preview-only")
             page.locator("#saveProvider").click()
+            expect(page.locator("#saveProvider")).to_be_enabled()
+            expect(page.locator("#providerEditorPage")).to_be_visible()
+            page.locator("#closeProviderEditor").click()
             expect(page.locator("#providerOverview")).to_be_visible()
         page.evaluate("""action => {
           const api = window.pywebview.api, read = api.get_providers;

@@ -53,6 +53,20 @@ def test_provider_icons_stay_readable_in_every_skin(browser, manager_url, skin, 
         page.locator('.nav-item[data-page="settings"]').click()
         expect(page.locator("html")).to_have_attribute("data-theme", theme)
         expect(page.locator(".provider-service")).to_have_count(7)
+        long_name = page.locator('.provider-service-copy strong').filter(has_text="DeepSeek · V4.1-flash-long-model-name")
+        expect(long_name).to_have_text("DeepSeek · V4.1-flash-long-model-name")
+        assert long_name.evaluate("el => getComputedStyle(el).whiteSpace") == "normal"
+        expect(page.locator('#providerServiceList').get_by_text("兼容服务", exact=True)).to_have_count(0)
+        tag_colors = page.locator('.provider-kind-tag').evaluate_all("""tags => tags.map(tag => ({
+          kind: tag.dataset.providerKind, color: getComputedStyle(tag).color,
+          background: getComputedStyle(tag).backgroundColor
+        }))""")
+        distinct = {tag["kind"]: tag["color"] for tag in tag_colors}
+        assert len(set(distinct.values())) == len(distinct)
+        for tag in tag_colors:
+            assert contrast_ratio(tag["color"], tag["background"]) >= 4.5, tag
+        switch = page.locator('.provider-thinking-switch').first.bounding_box()
+        assert switch and switch["width"] <= 34 and switch["height"] <= 20
         expect(page.locator(".provider-service.active .provider-logo svg")).to_be_visible()
         generic_colors = page.locator(".provider-logo svg").evaluate_all("""icons => icons.map(icon => ({
           color: getComputedStyle(icon).color,

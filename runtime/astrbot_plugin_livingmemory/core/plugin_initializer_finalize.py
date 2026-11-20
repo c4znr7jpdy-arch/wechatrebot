@@ -13,6 +13,7 @@ from .validators.index_validator import IndexValidator
 from .base.exceptions import InitializationError, ProviderNotReadyError
 from astrbot.api import logger
 from .faiss_async_persist import install_async_persist
+from .embedding_failover import EmbeddingFailover, embedding_index_path, resolve_initial_provider
 from .managers.consolidation_manager import MemoryConsolidationManager
 from .managers.memory_engine import MemoryEngine
 from .processors.memory_processor import MemoryProcessor
@@ -44,14 +45,30 @@ class InitializerFinalizeMixin:
             if not self.llm_provider or not isinstance(self.llm_provider, Provider):
                 raise ProviderNotReadyError("LLM Provider 未初始化或类型不正确")
 
+            self.embedding_provider = await resolve_initial_provider(
+                self.embedding_provider, self.context.get_all_embedding_providers()
+            )
+
+            base_index_paths = [index_path]
+            if graph_memory_enabled:
+                base_index_paths.append(graph_index_path)
+            index_path = embedding_index_path(index_path, self.embedding_provider)
+            graph_index_path = embedding_index_path(graph_index_path, self.embedding_provider)
+
             faiss_vec_db_cls = self._load_faiss_vec_db_class()
 
             # 检查索引文件维度与当前 embedding provider 维度是否一致
-            await self._check_and_fix_dimension_mismatch(str(index_path))
+            document_index_requires_rebuild = await self._check_and_fix_dimension_mismatch(str(index_path))
             if graph_memory_enabled:
                 self._graph_index_requires_rebuild = (
                     await self._check_and_fix_dimension_mismatch(str(graph_index_path))
                 )
+            indexes_ready = (
+                not document_index_requires_rebuild
+                and not self._graph_index_requires_rebuild
+                and index_path.is_file()
+                and (not graph_memory_enabled or graph_index_path.is_file())
+            )
 
             self.db = faiss_vec_db_cls(
                 str(db_path),
@@ -67,6 +84,13 @@ class InitializerFinalizeMixin:
                     self.embedding_provider,
                 )
                 await self.graph_db.initialize()
+            self.embedding_failover = EmbeddingFailover(
+                self.embedding_provider,
+                self.context.get_all_embedding_providers,
+                (self.db, self.graph_db),
+                base_index_paths,
+                ready=indexes_ready,
+            )
             logger.info(f"数据库已初始化。数据目录: {self.data_dir}")
 
             # 实例级替换 save_index：变更锁 + 线程内直写 + 防抖合并，
@@ -247,7 +271,11 @@ class InitializerFinalizeMixin:
                 config=memory_engine_config,
                 rerank_provider_resolver=resolve_rerank_provider,
             )
+            self.index_validator = IndexValidator(str(db_path), self.db)
+            self.embedding_failover.attach(self.memory_engine, self.index_validator)
+            await self.embedding_failover.validate_indexes()
             await self.memory_engine.initialize()
+            await self.embedding_failover.validate_indexes()
             logger.info("MemoryEngine 已初始化")
 
             # 初始化 ConversationManager
@@ -296,8 +324,9 @@ class InitializerFinalizeMixin:
             )
 
             # 初始化索引验证器并自动重建索引
-            self.index_validator = IndexValidator(str(db_path), self.db)
             await self._auto_rebuild_index_if_needed()
+            if not self.embedding_failover.ready:
+                self.embedding_failover.start_recovery()
 
             # 异步初始化 TextProcessor
             if self.memory_engine and hasattr(self.memory_engine, "text_processor"):
@@ -627,6 +656,14 @@ class InitializerFinalizeMixin:
     async def _teardown_partial_init(self) -> None:
         """关闭初始化过程中已创建的资源，使后续重试可以从干净状态开始。"""
         # 先落盘索引未写变更，再关闭各存储组件
+        maintenance = self._index_maintenance_task
+        if maintenance and maintenance is not asyncio.current_task() and not maintenance.done():
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
+        self._index_maintenance_task = None
+        failover = getattr(self, "embedding_failover", None)
+        if failover is not None:
+            await failover.close()
         await self.shutdown_index_persisters()
 
         if self.decay_scheduler is not None:

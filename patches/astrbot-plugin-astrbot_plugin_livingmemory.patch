@@ -138,7 +138,7 @@ index 0cf0205..55f01e6 100644
 +            await self._ensure_embedding_dimension()
 +
              # 检查索引文件维度与当前 embedding provider 维度是否一致
-             await self._check_and_fix_dimension_mismatch(str(index_path))
+             document_index_requires_rebuild = await self._check_and_fix_dimension_mismatch(str(index_path))
              if graph_memory_enabled:
 @@ -666,3 +668,18 @@ class InitializerFinalizeMixin:
              except Exception:

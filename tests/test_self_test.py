@@ -25,7 +25,7 @@ def test_manager_self_test_includes_unified_ui_assets(monkeypatch, tmp_path) -> 
 
 
 @pytest.mark.parametrize("missing", [
-    "scheduled-tasks.js", "features.js", "preview.js", "model-services.js",
+    "scheduled-tasks.js", "features.js", "preview.js", "model-services.js", "model-service-tests.js",
     "runtime-alerts.js", "runtime-alerts.css",
 ])
 def test_manager_self_test_rejects_missing_page_module(monkeypatch, tmp_path, missing):

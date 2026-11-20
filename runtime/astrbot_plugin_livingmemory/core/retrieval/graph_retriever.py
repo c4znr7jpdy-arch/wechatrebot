@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from ..utils.number_utils import clamp_float, safe_float
 from .graph_keyword_retriever import GraphKeywordRetriever
 from .graph_vector_retriever import GraphVectorRetriever
 from .rrf_fusion import BM25Result, RRFFusion, VectorResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -64,7 +67,18 @@ class GraphRetriever:
         keyword_results, vector_results = await asyncio.gather(
             self.keyword_retriever.search(query, k, session_id, persona_id),
             self.vector_retriever.search(query, k, session_id, persona_id),
+            return_exceptions=True,
         )
+        if isinstance(keyword_results, BaseException):
+            if isinstance(keyword_results, asyncio.CancelledError):
+                raise keyword_results
+            logger.warning("图谱关键词检索失败：%s", type(keyword_results).__name__)
+            keyword_results = []
+        if isinstance(vector_results, BaseException):
+            if isinstance(vector_results, asyncio.CancelledError):
+                raise vector_results
+            logger.warning("图谱向量检索暂不可用：%s", type(vector_results).__name__)
+            vector_results = []
 
         if not keyword_results and not vector_results:
             return []

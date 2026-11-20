@@ -10,9 +10,18 @@ from wechatrebot_manager.engine_api import EngineApiClient
 from wechatrebot_manager.error_catalog import load_error_catalog, provider_error_code
 from wechatrebot_manager.events import EventStore
 from wechatrebot_manager.plugin_errors import ProviderTestError
+from wechatrebot_manager.customer_config import ProviderService
 
 
 PROVIDER = "test/model"
+
+
+@pytest.fixture
+def saved_service(monkeypatch):
+    service = ProviderService(PROVIDER, "test", "Model", "https://example.test/v1", "model",
+                              "private-provider-key", True, False)
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (service,))
+    return service
 
 
 def reply(**changes):
@@ -102,7 +111,7 @@ def test_provider_error_classification_uses_metadata_not_prose():
     assert provider_error_code("APIStatusError", 200) == ""
 
 
-def test_failed_probe_is_visible_and_recorded_with_timeout_code(monkeypatch, tmp_path):
+def test_failed_probe_is_visible_and_recorded_with_timeout_code(monkeypatch, tmp_path, saved_service):
     api = ApplicationApi.__new__(ApplicationApi)
     api._install_root = tmp_path
     api._catalog = load_error_catalog()
@@ -123,9 +132,12 @@ def test_failed_probe_is_visible_and_recorded_with_timeout_code(monkeypatch, tmp
     assert event["code"] == "16007"
     assert event["details"]["operation"] == "test_provider"
     assert "private-secret" not in json.dumps(event)
+    assert result["error"]["last_test"]["status"] == "error"
+    assert result["error"]["last_test"]["error_code"] == "16007"
+    assert api.get_providers()["data"][0]["last_test"] == result["error"]["last_test"]
 
 
-def test_confirmed_probe_has_a_bounded_success_claim(monkeypatch, tmp_path):
+def test_confirmed_probe_has_a_bounded_success_claim(monkeypatch, tmp_path, saved_service):
     api = ApplicationApi.__new__(ApplicationApi)
     api._install_root = tmp_path
     client = probe(monkeypatch, tmp_path, reply())
@@ -135,3 +147,6 @@ def test_confirmed_probe_has_a_bounded_success_claim(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert result["data"]["response_text"] == "PONG"
     assert result["message"] == ""
+    assert result["data"]["last_test"]["status"] == "success"
+    assert result["data"]["last_test"]["elapsed_ms"] == 120
+    assert api.get_providers()["data"][0]["last_test"] == result["data"]["last_test"]

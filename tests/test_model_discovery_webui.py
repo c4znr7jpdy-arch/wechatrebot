@@ -94,8 +94,9 @@ def test_discovery_accepts_normalized_url_and_keeps_models_selectable(browser, m
         page.locator("#providerModelInput").fill("saved-model")
         page.locator("#providerApiKey").fill("preview-only-discovery")
         page.locator("#saveProvider").click()
-        expect(page.locator("#providerOverview")).to_be_visible()
-        page.locator('.provider-service footer [data-provider-edit]').first.click()
+        expect(page.locator("#saveProvider")).to_be_enabled()
+        expect(page.locator("#providerEditorPage")).to_be_visible()
+        expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
         endpoint.fill("https://relay.example")
         expect(page.locator("#providerEditorStatus")).to_have_text("有未保存修改")
         page.evaluate("""() => {
@@ -188,7 +189,9 @@ def test_provider_save_preserves_newer_draft(browser, manager_url, tmp_path, cha
         expect(page.locator("#modalBackdrop")).to_be_visible()
         page.locator("#modalCancel").click()
         page.locator("#saveProvider").click()
-        expect(page.locator("#providerOverview")).to_be_visible()
+        expect(page.locator("#saveProvider")).to_be_enabled()
+        expect(page.locator("#providerEditorPage")).to_be_visible()
+        expect(page.locator("#providerEditorStatus")).to_have_text("已保存")
         assert page.evaluate("window.providerSaveCalls.length") == 2
         assert not errors, errors
     finally:
