@@ -25,7 +25,7 @@ from .provider import (
     thinking_mode_matches,
     with_thinking_mode,
 )
-from .runtime_config import normalize_admin_id, normalize_admin_ids, write_runtime_configs
+from .runtime_config import CONFIG_FILE_LOCK, normalize_admin_id, normalize_admin_ids, write_runtime_configs
 
 
 _UI_PREFERENCES_LOCK = threading.Lock()
@@ -134,11 +134,12 @@ def load_web_search_settings(root: str | Path) -> dict[str, Any]:
 
 
 def save_web_search_settings(root: str | Path, values: dict[str, Any]) -> dict[str, Any]:
-    _, _, engine_path = _paths(root)
-    engine = _object(engine_path)
-    apply_web_search_values(engine, values)
-    write_json_atomic(engine_path, engine)
-    return web_search_settings_from_config(engine)
+    with CONFIG_FILE_LOCK:
+        _, _, engine_path = _paths(root)
+        engine = _object(engine_path)
+        apply_web_search_values(engine, values)
+        write_json_atomic(engine_path, engine)
+        return web_search_settings_from_config(engine)
 
 
 def _object(path: Path) -> dict[str, Any]:
@@ -205,23 +206,25 @@ def save_provider_thinking_preference(
 ) -> None:
     if not isinstance(enabled, bool):
         raise ValueError("思考模式只能选择开启或关闭。")
-    _, manager_path, _ = _paths(root)
-    manager = _object(manager_path)
-    preferences = _provider_thinking_preferences(root)
-    preferences[str(provider_id)] = enabled
-    manager["provider_thinking_modes"] = preferences
-    write_json_atomic(manager_path, manager)
+    with CONFIG_FILE_LOCK:
+        _, manager_path, _ = _paths(root)
+        manager = _object(manager_path)
+        preferences = _provider_thinking_preferences(root)
+        preferences[str(provider_id)] = enabled
+        manager["provider_thinking_modes"] = preferences
+        write_json_atomic(manager_path, manager)
 
 
 def delete_provider_thinking_preference(root: str | Path, provider_id: str) -> None:
-    _, manager_path, _ = _paths(root)
-    manager = _object(manager_path)
-    preferences = _provider_thinking_preferences(root)
-    if str(provider_id) not in preferences:
-        return
-    preferences.pop(str(provider_id), None)
-    manager["provider_thinking_modes"] = preferences
-    write_json_atomic(manager_path, manager)
+    with CONFIG_FILE_LOCK:
+        _, manager_path, _ = _paths(root)
+        manager = _object(manager_path)
+        preferences = _provider_thinking_preferences(root)
+        if str(provider_id) not in preferences:
+            return
+        preferences.pop(str(provider_id), None)
+        manager["provider_thinking_modes"] = preferences
+        write_json_atomic(manager_path, manager)
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,28 +444,29 @@ def load_robot_admin_ids(root: str | Path) -> tuple[str, ...]:
 def save_robot_settings(
     root: str | Path, settings: RobotSettings, *, apply_reply_identity: bool = True,
 ) -> RobotSettings:
-    install, manager_path, _ = _paths(root)
-    manager = _object(manager_path)
-    wechat_path = str(manager.get("wechat_exe_path", ""))
-    normalized_admins = normalize_admin_ids(settings.admin_ids)
-    if normalized_admins is None:
-        normalized_admin = normalize_admin_id(settings.admin_id) or ""
-        existing = load_robot_admin_ids(install)
-        normalized_admins = existing if existing and normalized_admin == existing[0] else (
-            (normalized_admin,) if normalized_admin else ()
-        )
-    from .brand import install_brand_profile
+    with CONFIG_FILE_LOCK:
+        install, manager_path, _ = _paths(root)
+        manager = _object(manager_path)
+        wechat_path = str(manager.get("wechat_exe_path", ""))
+        normalized_admins = normalize_admin_ids(settings.admin_ids)
+        if normalized_admins is None:
+            normalized_admin = normalize_admin_id(settings.admin_id) or ""
+            existing = load_robot_admin_ids(install)
+            normalized_admins = existing if existing and normalized_admin == existing[0] else (
+                (normalized_admin,) if normalized_admin else ()
+            )
+        from .brand import install_brand_profile
 
-    profile = install_brand_profile(install, settings.profile)
-    write_runtime_configs(
-        install,
-        wechat_path or None,
-        wechat_version=str(manager.get("wechat_version") or "") or None,
-        brand_profile=profile,
-        apply_brand_persona=apply_reply_identity,
-        admin_ids=normalized_admins,
-    )
-    return RobotSettings(profile=profile, admin_id=normalized_admins[0] if normalized_admins else "", admin_ids=normalized_admins)
+        profile = install_brand_profile(install, settings.profile)
+        write_runtime_configs(
+            install,
+            wechat_path or None,
+            wechat_version=str(manager.get("wechat_version") or "") or None,
+            brand_profile=profile,
+            apply_brand_persona=apply_reply_identity,
+            admin_ids=normalized_admins,
+        )
+        return RobotSettings(profile=profile, admin_id=normalized_admins[0] if normalized_admins else "", admin_ids=normalized_admins)
 
 
 def load_provider_services(
@@ -612,138 +616,142 @@ def save_provider_profile(
     *,
     make_default: bool = True,
 ) -> OpenAIProviderProfile:
-    install, manager_path, _ = _paths(root)
     normalized = profile.normalized()
     errors = normalized.validate()
     if errors:
         raise ValueError("；".join(errors))
-    manager = _object(manager_path)
-    wechat_path = str(manager.get("wechat_exe_path", ""))
-    write_runtime_configs(
-        install,
-        wechat_path or None,
-        wechat_version=str(manager.get("wechat_version") or "") or None,
-        provider_profile=normalized,
-        provider_make_default=make_default,
-    )
-    if normalized.thinking_enabled is not None:
-        save_provider_thinking_preference(
-            install, normalized.model_id, normalized.thinking_enabled
+    with CONFIG_FILE_LOCK:
+        install, manager_path, _ = _paths(root)
+        manager = _object(manager_path)
+        wechat_path = str(manager.get("wechat_exe_path", ""))
+        write_runtime_configs(
+            install,
+            wechat_path or None,
+            wechat_version=str(manager.get("wechat_version") or "") or None,
+            provider_profile=normalized,
+            provider_make_default=make_default,
         )
-    return normalized
+        if normalized.thinking_enabled is not None:
+            save_provider_thinking_preference(
+                install, normalized.model_id, normalized.thinking_enabled
+            )
+        return normalized
 
 
 def set_default_provider(root: str | Path, provider_id: str) -> None:
-    _, _, engine_path = _paths(root)
-    engine = _object(engine_path)
-    providers = engine.get("provider")
-    available = {
-        str(item.get("id") or "")
-        for item in (providers if isinstance(providers, list) else [])
-        if isinstance(item, dict) and item.get("enable") is not False
-    }
-    if provider_id not in available:
-        raise ValueError("所选模型服务不存在或尚未启用。")
-    settings = engine.get("provider_settings")
-    if not isinstance(settings, dict):
-        settings = {}
-        engine["provider_settings"] = settings
-    settings["default_provider_id"] = provider_id
-    settings["request_max_retries"] = PROVIDER_REQUEST_MAX_ATTEMPTS
-    settings["fallback_chat_models"] = []
-    settings["context_limit_reached_strategy"] = "llm_compress"
-    settings["llm_compress_provider_id"] = provider_id
-    write_json_atomic(engine_path, engine)
+    with CONFIG_FILE_LOCK:
+        _, _, engine_path = _paths(root)
+        engine = _object(engine_path)
+        providers = engine.get("provider")
+        available = {
+            str(item.get("id") or "")
+            for item in (providers if isinstance(providers, list) else [])
+            if isinstance(item, dict) and item.get("enable") is not False
+        }
+        if provider_id not in available:
+            raise ValueError("所选模型服务不存在或尚未启用。")
+        settings = engine.get("provider_settings")
+        if not isinstance(settings, dict):
+            settings = {}
+            engine["provider_settings"] = settings
+        settings["default_provider_id"] = provider_id
+        settings["request_max_retries"] = PROVIDER_REQUEST_MAX_ATTEMPTS
+        settings["fallback_chat_models"] = []
+        settings["context_limit_reached_strategy"] = "llm_compress"
+        settings["llm_compress_provider_id"] = provider_id
+        write_json_atomic(engine_path, engine)
 
 
 def set_provider_thinking(root: str | Path, provider_id: str, enabled: bool) -> bool:
     if not isinstance(enabled, bool):
         raise ValueError("思考模式只能选择开启或关闭。")
-    _, _, engine_path = _paths(root)
-    engine = _object(engine_path)
-    providers = engine.get("provider")
-    sources = engine.get("provider_sources")
-    model = next(
-        (item for item in providers if isinstance(item, dict) and item.get("id") == provider_id),
-        None,
-    ) if isinstance(providers, list) else None
-    source = next(
-        (
-            item
-            for item in sources
-            if isinstance(item, dict)
-            and item.get("id") == model.get("provider_source_id")
-        ),
-        None,
-    ) if isinstance(model, dict) and isinstance(sources, list) else None
-    if not isinstance(model, dict) or not isinstance(source, dict):
-        raise ValueError("所选模型服务不存在，请刷新后重试。")
-    api_base = str(source.get("api_base") or "")
-    model_name = str(model.get("model") or "")
-    protocol_applied = supports_thinking_toggle(api_base, model_name)
-    if protocol_applied:
-        model["custom_extra_body"] = with_thinking_mode(
-            model.get("custom_extra_body"), enabled,
-            api_base=api_base, model=model_name,
+    with CONFIG_FILE_LOCK:
+        _, _, engine_path = _paths(root)
+        engine = _object(engine_path)
+        providers = engine.get("provider")
+        sources = engine.get("provider_sources")
+        model = next(
+            (item for item in providers if isinstance(item, dict) and item.get("id") == provider_id),
+            None,
+        ) if isinstance(providers, list) else None
+        source = next(
+            (
+                item
+                for item in sources
+                if isinstance(item, dict)
+                and item.get("id") == model.get("provider_source_id")
+            ),
+            None,
+        ) if isinstance(model, dict) and isinstance(sources, list) else None
+        if not isinstance(model, dict) or not isinstance(source, dict):
+            raise ValueError("所选模型服务不存在，请刷新后重试。")
+        api_base = str(source.get("api_base") or "")
+        model_name = str(model.get("model") or "")
+        protocol_applied = supports_thinking_toggle(api_base, model_name)
+        if protocol_applied:
+            model["custom_extra_body"] = with_thinking_mode(
+                model.get("custom_extra_body"), enabled,
+                api_base=api_base, model=model_name,
+            )
+            write_json_atomic(engine_path, engine)
+            if not thinking_mode_matches(
+                model.get("custom_extra_body"), enabled,
+                api_base=api_base, model=model_name,
+            ):
+                raise ValueError("思考模式已提交，但未能确认保存，请刷新后重试。")
+        save_provider_thinking_preference(root, provider_id, enabled)
+        updated = next(
+            (item for item in load_provider_services(root) if item.provider_id == provider_id),
+            None,
         )
-        write_json_atomic(engine_path, engine)
-        if not thinking_mode_matches(
-            model.get("custom_extra_body"), enabled,
-            api_base=api_base, model=model_name,
-        ):
+        if updated is None or updated.thinking_enabled is not enabled:
             raise ValueError("思考模式已提交，但未能确认保存，请刷新后重试。")
-    save_provider_thinking_preference(root, provider_id, enabled)
-    updated = next(
-        (item for item in load_provider_services(root) if item.provider_id == provider_id),
-        None,
-    )
-    if updated is None or updated.thinking_enabled is not enabled:
-        raise ValueError("思考模式已提交，但未能确认保存，请刷新后重试。")
-    return protocol_applied
+        return protocol_applied
 
 
 def delete_provider_profile(root: str | Path, provider_id: str) -> None:
-    _, _, engine_path = _paths(root)
-    engine = _object(engine_path)
-    settings = engine.get("provider_settings")
-    default_id = (
-        str(settings.get("default_provider_id") or "")
-        if isinstance(settings, dict)
-        else ""
-    )
-    if provider_id == default_id:
-        raise ValueError("正在使用的回复模型不能删除，请先选择另一个模型。")
-    providers = engine.get("provider")
-    provider_items = providers if isinstance(providers, list) else []
-    target = next(
-        (
+    with CONFIG_FILE_LOCK:
+        _, _, engine_path = _paths(root)
+        engine = _object(engine_path)
+        settings = engine.get("provider_settings")
+        default_id = (
+            str(settings.get("default_provider_id") or "")
+            if isinstance(settings, dict)
+            else ""
+        )
+        if provider_id == default_id:
+            raise ValueError("正在使用的回复模型不能删除，请先选择另一个模型。")
+        providers = engine.get("provider")
+        provider_items = providers if isinstance(providers, list) else []
+        target = next(
+            (
+                item
+                for item in provider_items
+                if isinstance(item, dict) and item.get("id") == provider_id
+            ),
+            None,
+        )
+        if not isinstance(target, dict):
+            raise ValueError("所选模型服务不存在，请刷新后重试。")
+        source_id = str(target.get("provider_source_id") or "")
+        remaining = [
             item
             for item in provider_items
-            if isinstance(item, dict) and item.get("id") == provider_id
-        ),
-        None,
-    )
-    if not isinstance(target, dict):
-        raise ValueError("所选模型服务不存在，请刷新后重试。")
-    source_id = str(target.get("provider_source_id") or "")
-    remaining = [
-        item
-        for item in provider_items
-        if not isinstance(item, dict) or item.get("id") != provider_id
-    ]
-    engine["provider"] = remaining
-    if source_id and not any(
-        isinstance(item, dict) and item.get("provider_source_id") == source_id
-        for item in remaining
-    ):
-        sources = engine.get("provider_sources")
-        engine["provider_sources"] = [
-            item
-            for item in (sources if isinstance(sources, list) else [])
-            if not isinstance(item, dict) or item.get("id") != source_id
+            if not isinstance(item, dict) or item.get("id") != provider_id
         ]
-    write_json_atomic(engine_path, engine)
-    delete_provider_thinking_preference(root, provider_id)
+        engine["provider"] = remaining
+        if source_id and not any(
+            isinstance(item, dict) and item.get("provider_source_id") == source_id
+            for item in remaining
+        ):
+            sources = engine.get("provider_sources")
+            engine["provider_sources"] = [
+                item
+                for item in (sources if isinstance(sources, list) else [])
+                if not isinstance(item, dict) or item.get("id") != source_id
+            ]
+        write_json_atomic(engine_path, engine)
+        delete_provider_thinking_preference(root, provider_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -825,30 +833,60 @@ def load_plugins(root: str | Path) -> tuple[PluginEntry, ...]:
 
 
 def set_plugin_enabled(root: str | Path, module_name: str, enabled: bool) -> None:
-    install, _, engine_path = _paths(root)
-    engine = _object(engine_path)
-    plugins = load_plugins(root)
-    available = {item.module_name for item in plugins}
-    if module_name not in available:
-        raise ValueError("所选功能不存在或尚未交付。")
-    configured = engine.get("plugin_set", ["*"])
-    names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
-    if "*" in names:
-        plugin_root = install / "app" / "astrbot" / "data" / "plugins"
-        names = {
-            path.name
-            for path in plugin_root.iterdir()
-            if path.is_dir()
-            and not path.name.startswith((".", "__"))
-            and path.name not in {"data", "logs"}
-            and not path.name.endswith("_disabled")
-        }
-    if enabled:
-        names.add(module_name)
-    else:
-        names.discard(module_name)
-    engine["plugin_set"] = sorted(names - RETIRED_PLUGIN_MODULES)
-    write_json_atomic(engine_path, engine)
+    with CONFIG_FILE_LOCK:
+        install, _, engine_path = _paths(root)
+        engine = _object(engine_path)
+        plugins = load_plugins(root)
+        available = {item.module_name for item in plugins}
+        if module_name not in available:
+            raise ValueError("所选功能不存在或尚未交付。")
+        configured = engine.get("plugin_set", ["*"])
+        names = {str(item) for item in configured} if isinstance(configured, list) else {"*"}
+        if "*" in names:
+            plugin_root = install / "app" / "astrbot" / "data" / "plugins"
+            names = {
+                path.name
+                for path in plugin_root.iterdir()
+                if path.is_dir()
+                and not path.name.startswith((".", "__"))
+                and path.name not in {"data", "logs"}
+                and not path.name.endswith("_disabled")
+            }
+        if enabled:
+            names.add(module_name)
+        else:
+            names.discard(module_name)
+        engine["plugin_set"] = sorted(names - RETIRED_PLUGIN_MODULES)
+        write_json_atomic(engine_path, engine)
+
+
+def apply_brand_change(install_root: str | Path, profile: BrandProfile) -> BrandProfile:
+    with CONFIG_FILE_LOCK:
+        current = load_robot_settings(install_root)
+        return save_robot_settings(
+            install_root,
+            RobotSettings(profile=profile, admin_id=current.admin_id, admin_ids=current.admin_ids),
+        ).profile
+
+
+def load_brand_profile(install_root: str | Path) -> BrandProfile:
+    return load_robot_settings(install_root).profile
+
+
+def apply_wechat_change(install_root: str | Path, wechat_path: str | Path) -> None:
+    from .wechat_path import validate_wechat_executable
+
+    root = Path(install_root).expanduser().resolve()
+    item = validate_wechat_executable(wechat_path)
+    if not item.supported:
+        raise ValueError("；".join(item.errors))
+    with CONFIG_FILE_LOCK:
+        write_runtime_configs(
+            root,
+            item.path,
+            wechat_version=item.version,
+            brand_profile=load_brand_profile(root),
+        )
 
 
 __all__ = [
@@ -856,9 +894,12 @@ __all__ = [
     "ProviderService",
     "RobotSettings",
     "WEB_SEARCH_PROVIDERS",
+    "apply_brand_change",
     "apply_web_search_values",
+    "apply_wechat_change",
     "delete_provider_profile",
     "delete_provider_thinking_preference",
+    "load_brand_profile",
     "load_plugins",
     "load_provider_profile",
     "load_provider_services",

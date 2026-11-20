@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
-from wechatrebot_manager.control_center import apply_brand_change
+from wechatrebot_manager.customer_config import apply_brand_change
 from wechatrebot_manager.runtime_config import write_runtime_configs
 
 

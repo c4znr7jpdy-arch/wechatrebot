@@ -122,6 +122,58 @@ def _copied_record(target: Path, output: Path) -> dict[str, str]:
     return {"target": target.relative_to(output).as_posix()}
 
 
+def _apply_git_patches(
+    commercial_root: Path,
+    output: Path,
+    patches: list[Path],
+    target_root: Path,
+    *,
+    strip_level: int,
+    allow_already_applied: bool,
+) -> None:
+    inside_repo = target_root.is_relative_to(commercial_root)
+    cwd = commercial_root if inside_repo else target_root
+    directory_args = (
+        [f"--directory={target_root.relative_to(commercial_root).as_posix()}"]
+        if inside_repo
+        else []
+    )
+    for patch in patches:
+        command = [
+            "git",
+            "apply",
+            "--ignore-space-change",
+            f"-p{strip_level}",
+            *directory_args,
+            str(patch),
+        ]
+        check_command = [*command[:2], "--quiet", "--check", *command[2:]]
+        try:
+            subprocess.run(check_command, cwd=cwd, check=True)
+        except subprocess.CalledProcessError as exc:
+            if not allow_already_applied:
+                raise
+            # Some source checkouts already contain the reviewed patch. Keep
+            # the patch in corresponding-source without applying it twice.
+            try:
+                subprocess.run(
+                    [*command[:2], "--quiet", "--reverse", "--check", *command[2:]],
+                    cwd=cwd,
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                raise exc
+            print(
+                f"Plugin patch already present; skipped: {patch.name}",
+                flush=True,
+            )
+        else:
+            subprocess.run(command, cwd=cwd, check=True)
+        patch_target = output / "legal" / "corresponding-source" / patch.name
+        patch_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(patch, patch_target)
+
+
 def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
     prefix = "astrbot-plugin-"
     plugin_manifest_path = commercial_root / "release" / "plugin-manifest.json"
@@ -136,11 +188,13 @@ def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
             }
         except (OSError, json.JSONDecodeError, TypeError, KeyError):
             excluded_modules = set()
+
     def patch_order(path: Path) -> tuple[str, int, str]:
         raw = path.stem.removeprefix(prefix)
         module, separator, variant = raw.partition("--")
         return module.casefold(), 1 if separator else 0, variant.casefold()
 
+    grouped: dict[Path, list[Path]] = {}
     for patch in sorted(
         (commercial_root / "patches").glob(f"{prefix}*.patch"),
         key=patch_order,
@@ -151,52 +205,17 @@ def _apply_plugin_patches(commercial_root: Path, output: Path) -> None:
             if module in excluded_modules:
                 continue
             raise RuntimeError(f"plugin patch target is missing: {module}")
-        plugin_relative = plugin_root.relative_to(commercial_root).as_posix()
-        command = [
-            "git",
-            "apply",
-            "--ignore-space-change",
-            "-p1",
-            f"--directory={plugin_relative}",
-            str(patch),
-        ]
-        # A source checkout may already include the reviewed change.  Keep
-        # the expected failed forward check quiet; the reverse check below
-        # decides whether this is an idempotent no-op or a real mismatch.
-        check_command = [*command[:2], "--quiet", "--check", *command[2:]]
-        try:
-            subprocess.run(
-                check_command,
-                cwd=commercial_root,
-                check=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            # Some source checkouts already contain the reviewed patch. Keep
-            # the patch in corresponding-source without applying it twice.
-            try:
-                subprocess.run(
-                    [
-                        *command[:2],
-                        "--quiet",
-                        "--reverse",
-                        "--check",
-                        *command[2:],
-                    ],
-                    cwd=commercial_root,
-                    check=True,
-                )
-            except subprocess.CalledProcessError:
-                raise exc
-            else:
-                print(
-                    f"Plugin patch already present; skipped: {patch.name}",
-                    flush=True,
-                )
-        else:
-            subprocess.run(command, cwd=commercial_root, check=True)
-        patch_target = output / "legal" / "corresponding-source" / patch.name
-        patch_target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(patch, patch_target)
+        grouped.setdefault(plugin_root, []).append(patch)
+
+    for plugin_root, patches in grouped.items():
+        _apply_git_patches(
+            commercial_root,
+            output,
+            patches,
+            plugin_root,
+            strip_level=1,
+            allow_already_applied=True,
+        )
 
 
 def _apply_bridge_patch(commercial_root: Path, output: Path) -> None:
@@ -206,25 +225,14 @@ def _apply_bridge_patch(commercial_root: Path, output: Path) -> None:
         raise RuntimeError("bridge patches are missing")
     if not bridge_root.is_dir():
         raise RuntimeError("bridge patch target is missing")
-    bridge_relative = bridge_root.relative_to(commercial_root).as_posix()
-    for patch in patches:
-        command = [
-            "git",
-            "apply",
-            "--ignore-space-change",
-            "-p2",
-            f"--directory={bridge_relative}",
-            str(patch),
-        ]
-        subprocess.run(
-            [*command[:2], "--check", *command[2:]],
-            cwd=commercial_root,
-            check=True,
-        )
-        subprocess.run(command, cwd=commercial_root, check=True)
-        patch_target = output / "legal" / "corresponding-source" / patch.name
-        patch_target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(patch, patch_target)
+    _apply_git_patches(
+        commercial_root,
+        output,
+        patches,
+        bridge_root,
+        strip_level=2,
+        allow_already_applied=False,
+    )
 
 
 def _remove_embedded_checkin_accounts(output: Path) -> None:

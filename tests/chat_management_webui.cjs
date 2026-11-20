@@ -164,10 +164,149 @@ async function unknownAccountRetainsDirectories() {
   assert.equal(s.contactAccount, 'account-a');
 }
 
+async function groupPolicyPollingStopsOutsidePolicyTab() {
+  const assert = require('assert');
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+
+  const elements = new Map();
+  const $ = (selector) => {
+    if (!elements.has(selector)) {
+      elements.set(selector, {
+        value: '',
+        innerHTML: '',
+        textContent: '',
+        hidden: selector === '#modalBackdrop',
+        disabled: false,
+        className: '',
+        classList: {toggle() {}, add() {}, remove() {}},
+        elements: {},
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        addEventListener() {},
+        setAttribute() {},
+        removeAttribute() {},
+      });
+    }
+    return elements.get(selector);
+  };
+
+  let nextTimerId = 1;
+  const scheduled = [];
+  const activeTimers = new Map();
+  const doc = {hidden: false, addEventListener() {}, removeEventListener() {}};
+  const windowObj = {
+    document: doc,
+    addEventListener() {},
+    removeEventListener() {},
+    localStorage: {getItem: () => null, setItem() {}},
+    managerMotion: {enter() {}},
+    setTimeout(callback, delay) {
+      const id = nextTimerId++;
+      const entry = {id, callback, delay};
+      scheduled.push(entry);
+      activeTimers.set(id, entry);
+      return id;
+    },
+    clearTimeout(id) {
+      activeTimers.delete(id);
+    },
+  };
+  windowObj.window = windowObj;
+  const context = {window: windowObj, document: doc, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, Map, Set, URLSearchParams, console, Promise};
+
+  const webuiDir = path.resolve(__dirname, '..', 'src', 'wechatrebot_manager', 'app_webui');
+  for (const name of ['chat-profiles.js', 'chat-management.js']) {
+    vm.runInNewContext(fs.readFileSync(path.join(webuiDir, name), 'utf8'), context);
+  }
+
+  const state = {
+    activePage: 'groups',
+    chatManagementTab: 'groups',
+    chatManagementAccount: 'wxid_1',
+    groupAccount: 'wxid_1',
+    contactAccount: 'wxid_1',
+    status: {runtime: {account_status_available: true}},
+    groups: [{group_id: 'room@chatroom', name: 'Test Room', member_count: 3}],
+    groupsLoaded: true,
+    groupPolicies: {'room@chatroom': {policy: {bot_enabled: true}, pending_bot_control_request: null}},
+    selectedGroup: 'room@chatroom',
+    groupInspectorView: 'policy',
+    contacts: [],
+    contactsLoaded: true,
+    contactPolicies: {},
+    selectedContact: '',
+    contactFilter: '',
+    groupFilter: '',
+  };
+
+  const controller = context.window.createChatManagement({
+    $,
+    $$: () => [],
+    state,
+    CONTACT_PAGE_SIZE: 2,
+    GROUP_DIRECTORY_RETRY_DELAYS_MS: [1500, 4000],
+    GROUP_MEMBER_RETRY_DELAYS_MS: [800, 2000],
+    GROUP_MEMBER_REQUEST_CONCURRENCY: 4,
+    GROUP_MEMBER_COUNTS_STORAGE_PREFIX: 'test:',
+    api: async () => ({policy: {bot_enabled: true}, pending_bot_control_request: null}),
+    readHomeSetupAlertDismissals: () => [],
+    escapeHtml: (value) => String(value ?? ''),
+    fullTime: (value) => value,
+    icon: () => '',
+    avatarMarkup: () => '',
+    bindAvatarFallbacks() {},
+    contactFactsMarkup: () => '',
+    reportError() {},
+    confirmAction: async () => true,
+    openCoreTemplates() {},
+  });
+
+  // Active groups policy tab schedules a single pollSelectedGroupPolicy timer
+  // and repeated sync calls must not reset or starve the countdown.
+  controller.syncGroupPolicyPolling();
+  assert.strictEqual(activeTimers.size, 1);
+  assert.strictEqual(scheduled.length, 1);
+  assert.strictEqual(scheduled[0].callback.name, 'pollSelectedGroupPolicy');
+  const firstTimerId = scheduled[0].id;
+  controller.syncGroupPolicyPolling();
+  assert.strictEqual(activeTimers.size, 1);
+  assert.strictEqual(scheduled.length, 1);
+  assert.strictEqual(activeTimers.has(firstTimerId), true);
+
+  // Switching away to private tab cancels the timer and schedules nothing new.
+  controller.selectChatManagementTab('private');
+  assert.strictEqual(activeTimers.size, 0);
+
+  // Returning to groups tab with an active selected policy re-arms polling.
+  controller.selectChatManagementTab('groups');
+  assert.strictEqual(activeTimers.size, 1);
+
+  // Navigating away from chat page cancels polling on sync.
+  state.activePage = 'dashboard';
+  controller.syncGroupPolicyPolling();
+  assert.strictEqual(activeTimers.size, 0);
+
+  // Hidden document keeps polling stopped even back on groups page.
+  state.activePage = 'groups';
+  doc.hidden = true;
+  controller.syncGroupPolicyPolling();
+  assert.strictEqual(activeTimers.size, 0);
+
+  // Becoming visible again resumes polling; invalidating chat context stops it.
+  doc.hidden = false;
+  controller.syncGroupPolicyPolling();
+  assert.strictEqual(activeTimers.size, 1);
+  controller.invalidateChatManagementContext({nextAccount: ''});
+  assert.strictEqual(activeTimers.size, 0);
+}
+
 (async () => {
   await retainedContacts();
   await retainedGroupsAndEmptyDirectories();
   await accountIsolation();
   await unknownAccountRetainsDirectories();
-  console.log('chat directories retain cached views and edits; account isolation: passed');
+  await groupPolicyPollingStopsOutsidePolicyTab();
+  console.log('chat directories retain cached views and edits; account isolation; polling lifecycle: passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

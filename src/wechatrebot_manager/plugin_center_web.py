@@ -166,15 +166,25 @@ def _handler(
             message = str(exc) if isinstance(exc, PluginCenterError) else "操作未完成，请稍后重试。"
             self._send_json(status, {"ok": False, "message": message})
 
-        def _body(self) -> dict[str, Any]:
+        def _read_request_body(self, limit: int, *, require_non_empty: bool = False) -> bytes:
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError as exc:
                 raise PluginCenterError("请求长度无效。") from exc
-            if length <= 0 or length > _MAX_BODY_BYTES:
+            if length < 0:
+                raise PluginCenterError("请求长度无效。")
+            if require_non_empty and length == 0:
                 raise PluginCenterError("请求内容为空或过大。")
+            if length > limit:
+                raise PluginCenterError(
+                    "请求内容为空或过大。" if require_non_empty else "请求内容过大。"
+                )
+            return self.rfile.read(length) if length else b""
+
+        def _body(self) -> dict[str, Any]:
+            raw = self._read_request_body(_MAX_BODY_BYTES, require_non_empty=True)
             try:
-                value = json.loads(self.rfile.read(length).decode("utf-8"))
+                value = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise PluginCenterError("请求内容不是有效的 JSON。") from exc
             if not isinstance(value, dict):
@@ -229,55 +239,17 @@ def _handler(
             self.end_headers()
             self.wfile.write(raw)
 
-        def _proxy(self) -> None:
-            self._require_same_origin()
-            split = urlsplit(self.path)
-            if not any(split.path.startswith(prefix) for prefix in _PROXY_PREFIXES):
-                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "页面不存在。"})
-                return
-            length = int(self.headers.get("Content-Length") or 0)
-            if length > _MAX_BODY_BYTES:
-                raise PluginCenterError("请求内容过大。")
-            body = self.rfile.read(length) if length else None
-            upstream_path = split.path + (f"?{split.query}" if split.query else "")
-            status, headers, raw = service.engine.raw_request(
-                self.command,
-                upstream_path,
-                body=body,
-                content_type=self.headers.get("Content-Type", "application/json"),
-                accept_language=self.headers.get("Accept-Language", "zh-CN"),
-            )
-            normalized_headers = {key.casefold(): value for key, value in headers.items()}
-            raw = _white_label_core_page_content(
-                split.path,
-                normalized_headers.get("content-type", ""),
-                raw,
-            )
-            self.send_response(status)
-            self._security_headers()
-            for key in ("Content-Type", "Content-Security-Policy", "Permissions-Policy"):
-                value = normalized_headers.get(key.casefold())
-                if value:
-                    self.send_header(key, value)
-            self.send_header("Content-Length", str(len(raw)))
-            self.end_headers()
-            self.wfile.write(raw)
-
-        def _proxy_extension(self, public_id: str, endpoint: str) -> None:
-            self._require_same_origin()
-            split = urlsplit(self.path)
-            upstream_path = service.extension_path(public_id, endpoint)
-            if split.query:
-                upstream_path = f"{upstream_path}?{split.query}"
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError as exc:
-                raise PluginCenterError("请求长度无效。") from exc
-            content_type = self.headers.get("Content-Type", "application/json")
-            limit = _extension_body_limit(upstream_path, content_type)
-            if length > limit:
-                raise PluginCenterError("请求内容过大。")
-            body = self.rfile.read(length) if length else None
+        def _forward_upstream(
+            self,
+            upstream_path: str,
+            *,
+            content_type: str,
+            limit: int,
+            forward_headers: tuple[str, ...],
+            rebrand_path: str | None = None,
+        ) -> None:
+            raw_body = self._read_request_body(limit)
+            body = raw_body if raw_body else None
             status, headers, raw = service.engine.raw_request(
                 self.command,
                 upstream_path,
@@ -286,14 +258,50 @@ def _handler(
                 accept_language=self.headers.get("Accept-Language", "zh-CN"),
             )
             normalized_headers = {key.casefold(): value for key, value in headers.items()}
+            if rebrand_path is not None:
+                raw = _white_label_core_page_content(
+                    rebrand_path,
+                    normalized_headers.get("content-type", ""),
+                    raw,
+                )
             self.send_response(status)
             self._security_headers()
-            content_type = normalized_headers.get("content-type")
-            if content_type:
-                self.send_header("Content-Type", content_type)
+            for key in forward_headers:
+                value = normalized_headers.get(key.casefold())
+                if value:
+                    self.send_header(key, value)
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
+
+        def _proxy(self) -> None:
+            self._require_same_origin()
+            split = urlsplit(self.path)
+            if not any(split.path.startswith(prefix) for prefix in _PROXY_PREFIXES):
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "页面不存在。"})
+                return
+            upstream_path = split.path + (f"?{split.query}" if split.query else "")
+            self._forward_upstream(
+                upstream_path,
+                content_type=self.headers.get("Content-Type", "application/json"),
+                limit=_MAX_BODY_BYTES,
+                forward_headers=("Content-Type", "Content-Security-Policy", "Permissions-Policy"),
+                rebrand_path=split.path,
+            )
+
+        def _proxy_extension(self, public_id: str, endpoint: str) -> None:
+            self._require_same_origin()
+            split = urlsplit(self.path)
+            upstream_path = service.extension_path(public_id, endpoint)
+            if split.query:
+                upstream_path = f"{upstream_path}?{split.query}"
+            content_type = self.headers.get("Content-Type", "application/json")
+            self._forward_upstream(
+                upstream_path,
+                content_type=content_type,
+                limit=_extension_body_limit(upstream_path, content_type),
+                forward_headers=("Content-Type",),
+            )
 
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             try:
@@ -383,7 +391,7 @@ def _handler(
                     "/assets/AlibabaPuHuiTi2-Regular.woff2",
                     "/assets/AlibabaPuHuiTi2-Bold.woff2",
                 }:
-                    self._serve_asset(split.path.lstrip("/"), "font/woff2")
+                    self._serve_asset(split.path.lstrip("/"), "font/woff2", root=shared_assets)
                     return
                 if any(split.path.startswith(prefix) for prefix in _PROXY_PREFIXES):
                     self._proxy()

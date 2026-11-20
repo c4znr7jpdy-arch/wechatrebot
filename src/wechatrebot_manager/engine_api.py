@@ -63,12 +63,13 @@ class EngineApiClient:
             raise EngineUnavailableError("回复引擎的本地控制接口尚未就绪。")
         return secret, username, port
 
-    def _token(self) -> str:
-        secret, username, _ = self._settings()
+    @staticmethod
+    def _token_for(secret: str, username: str) -> str:
         header = _base64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+        now = int(time.time())
         body = _base64url(
             json.dumps(
-                {"username": username, "iat": int(time.time()), "exp": int(time.time()) + 300},
+                {"username": username, "iat": now, "exp": now + 300},
                 separators=(",", ":"),
             ).encode()
         )
@@ -76,11 +77,19 @@ class EngineApiClient:
         signature = _base64url(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest())
         return f"{header}.{body}.{signature}"
 
-    def _url(self, path: str) -> str:
-        _, _, port = self._settings()
+    def _token(self) -> str:
+        secret, username, _ = self._settings()
+        return self._token_for(secret, username)
+
+    @staticmethod
+    def _url_for(port: int, path: str) -> str:
         if not path.startswith("/"):
             raise ValueError("engine API path must be absolute")
         return f"http://127.0.0.1:{port}{path}"
+
+    def _url(self, path: str) -> str:
+        _, _, port = self._settings()
+        return self._url_for(port, path)
 
     def raw_request(
         self,
@@ -91,13 +100,26 @@ class EngineApiClient:
         content_type: str = "application/json",
         accept_language: str = "zh-CN",
     ) -> tuple[int, dict[str, str], bytes]:
+        custom_hooks = (
+            "_token" in self.__dict__
+            or "_url" in self.__dict__
+            or type(self)._token is not _DEFAULT_ENGINE_TOKEN
+            or type(self)._url is not _DEFAULT_ENGINE_URL
+        )
+        if custom_hooks:
+            token = self._token()
+            url = self._url(path)
+        else:
+            secret, username, port = self._settings()
+            token = self._token_for(secret, username)
+            url = self._url_for(port, path)
         headers = {
-            "Authorization": f"Bearer {self._token()}",
+            "Authorization": f"Bearer {token}",
             "Accept-Language": accept_language,
         }
         if body is not None:
             headers["Content-Type"] = content_type
-        request = Request(self._url(path), data=body, headers=headers, method=method)
+        request = Request(url, data=body, headers=headers, method=method)
         try:
             timeout = (
                 max(self.timeout, 600)
@@ -138,7 +160,9 @@ class EngineApiClient:
 
     def is_available(self) -> bool:
         try:
-            self.plugin_states()
+            plugins = self.request("GET", "/api/v1/plugins")
+            if not isinstance(plugins, list):
+                raise PluginCenterError("无法确认功能运行状态，请刷新后重试。")
             return True
         except EngineUnavailableError:
             return False
@@ -553,3 +577,7 @@ class EngineApiClient:
         if not isinstance(data, dict) or not isinstance(data.get("content_path"), str):
             raise PluginCenterError("高级配置页暂时无法打开。")
         return data["content_path"]
+
+
+_DEFAULT_ENGINE_TOKEN = EngineApiClient._token
+_DEFAULT_ENGINE_URL = EngineApiClient._url

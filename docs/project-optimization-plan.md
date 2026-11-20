@@ -31,6 +31,14 @@
 | 7 | OPT-07 | CI 去重、缓存与性能回归证据 | 中 | 代码及定向验证完成 | 保留完整检查，旧运行取消，确定性预算可检查 |
 | 8 | OPT-08 | 隐藏窗口停止非必要目录轮询 | 中 | 代码及定向验证完成 | 隐藏不请求，恢复刷新，生命周期监控保持 |
 | 9 | OPT-09 | 更新引擎按职责渐进拆分 | 低 | 代码及定向验证完成 | 导出接口、校验、安装事务及回滚行为不变 |
+| 10 | OPT-10 | 群目录锁隔离与头像批量缓存 | 中 | 代码及定向验证完成 | `PortraitCache` 只读免 DDL、`batch()`/`still_current`、`GroupDirectoryService.list()` 锁外网络 I/O |
+| 11 | OPT-11 | 消除启动/插件中心重复探测与配置读取 | 中 | 代码及定向验证完成 | `EngineApiClient`/`PluginCenterService`/`app_shell` 去重，保留测试替身缝隙 |
+| 12 | OPT-12 | 本地增量更新补丁基线完整性 | 低 | 代码及定向验证完成 | `update_local_incremental.BASE_INPUTS` 纳管后台权限补丁 |
+| 13 | OPT-13 | UI 字体去重与打包清单补齐 | 中 | 代码及定向验证完成 | 移除 `plugin_webui` 重复字体，统一走 `/assets/` 并补齐 `pyproject.toml` |
+| 14 | OPT-14 | 本地 HTTP 代理体校验与配置写入互斥锁 | 中 | 代码及定向验证完成 | `_read_request_body`/`_forward_upstream` 统一校验，共享 `CONFIG_FILE_LOCK` |
+| 15 | OPT-15 | 群策略轮询定时器生命周期门控 | 低 | 代码及定向验证完成 | 非活跃页/隐藏标签页/无效上下文自动停表，`pollSelectedGroupPolicy` 命名兼容 |
+| 16 | OPT-16 | 移除遗留 Tkinter 死代码并迁移品牌辅助 | 低 | 代码及定向验证完成 | 删除 `control_center.py`/`update_ui.py`，品牌辅助迁入 `customer_config.py` |
+| 17 | OPT-17 | Staging 补丁应用流程收敛复用 | 低 | 代码及定向验证完成 | `scripts/build_staging.py` 提取 `_apply_git_patches()` 支持仓内外目标 |
 
 ## 证据与设计
 
@@ -106,6 +114,45 @@
 
 先提取职责稳定的清单/包验证或事务辅助逻辑，保留已有导出和测试替换点，复用 `update_cache`、`UpdateFailure`、`UpdateLogger`、原子写入和 `OwnedProcess`。不机械按行数拆分，不新增另一套规则。按更新、签名篡改、路径边界、中断、回滚、进程退出定向测试验证，安装器/真实 Windows 升级验收仍由用户执行。
 
+### OPT-10：群目录锁隔离与头像批量缓存
+
+- `portrait_cache.py`：`read()` 只读路径跳过 `CREATE TABLE IF NOT EXISTS`，避免无库目录触发 DDL/建库；新增 `batch(account)` 与 `read_account(account)` 在单次 SQLite 连接中预加载账号缓存；`enrich()` 与 `_refresh()` 新增 `still_current` 回调（仅按位置参数向 `_POOL.submit` 传参以兼容测试替身，并在 `_LOCK` 外提交任务），账号切换时在抓取与落盘前中止过期刷新。
+- `group_directory.py`：引入 `_account_generation` 与 `_is_generation_current()`；`list()` 在释放 `_lock` 后执行 `/api/manager/groups` HTTP 请求，写回 `_snapshot` 前校验当前账号与代数；以 `with self._portraits.batch(account):` 包裹头像合并。
+
+### OPT-11：消除启动/插件中心重复探测与配置读取
+
+- `engine_api.py`：提取 `_token_for` / `_url_for` 及默认引用比对，未覆盖 `_token`/`_url` 时单次 `raw_request()` 仅读取一次 `_settings()`；`is_available()` 仅请求 `GET /api/v1/plugins` 而非完整 `plugin_states()`。
+- `plugin_center.py`：`_runtime_plugin_states()` 在未替换 `is_available` 时跳过冗余 pre-flight 直接查询状态；新增轻量 `has_visible_features()`；`_catalog_items(..., target_public_id=...)` 按目标筛选，详情查询不再遍历无关插件的 `_conf_schema.json` 和 `pages/`。
+- `app_shell.py`：`_onboarding_readiness()` 在真实 `GroupDirectoryService` 上显式传 `include_portraits=False`，并以 `has_visible_features()` 代替完整 `catalog()`。
+
+### OPT-12：本地增量更新补丁基线完整性
+
+- `scripts/update_local_incremental.py` 在 `BASE_INPUTS` 补齐 `patches/astrbot-4.26.6-background-permissions.patch` 到 `legal/corresponding-source/astrbot-4.26.6-background-permissions.patch` 的映射，与 `source-manifest.json`、`build_staging.py`、`build_local_package.py` 和 `prepare_component_update.py` 保持一致。
+
+### OPT-13：UI 字体去重与打包清单补齐
+
+- 移除 `src/wechatrebot_manager/plugin_webui/assets/` 下重复的 `AlibabaPuHuiTi2-Bold.woff2` 与 `AlibabaPuHuiTi2-Regular.woff2`（约 8.18 MB）。
+- `plugin_center_web.py` 直接由共享 `app_webui/assets` 挂载字体资源，`plugin_webui/app.css` 的 `@font-face` 指向 `/assets/AlibabaPuHuiTi2-*.woff2`。
+- `pyproject.toml` 在 `[tool.setuptools.package-data]` 中补齐 `app_webui/assets/*.woff2`、`app_webui/assets/app-icon.*` 与 `app_webui/assets/help-*.webp`。
+
+### OPT-14：本地 HTTP 代理体校验与配置写入互斥锁
+
+- `plugin_center_web.py` 提取 `_read_request_body(limit, require_non_empty=...)` 统一拦截非法或负数 `Content-Length`（返回 400），并提取 `_forward_upstream()` 消除 `_proxy()` 与 `_proxy_extension()` 的重复转发代码。
+- `runtime_config.py` 与 `customer_config.py` 共用 `CONFIG_FILE_LOCK = threading.RLock()`，串行化运行时配置、品牌资料、搜索设置、思考偏好、模型配置和插件开关的并发读写。
+
+### OPT-15：群策略轮询定时器生命周期门控
+
+- `app_webui/chat-management.js` 与 `app_webui/app.js` 将原先无条件自调度的 `pollSelectedGroupPolicy` 定时器替换为受 `shouldPollGroupPolicy()`、`stopGroupPolicyPolling()`、`syncGroupPolicyPolling()` 管理的生命周期逻辑，在页面切换、文档隐藏、Tab 切换、上下文失效或账号变更时及时清理定时器，同时保留 `pollSelectedGroupPolicy` 回调命名以兼容既有浏览器测试拦截点。
+
+### OPT-16：移除遗留 Tkinter 死代码并迁移品牌辅助
+
+- 将活跃路径使用的 `apply_brand_change`、`load_brand_profile`、`apply_wechat_change` 迁入 `customer_config.py`（受 `CONFIG_FILE_LOCK` 保护并纳入 `__all__`）。
+- 移除废弃模块 `control_center.py` 与 `update_ui.py`，更新 `tests/test_control_center.py` 与 `tests/test_runtime_port_consumers.py` 对接当前 `customer_config` / `app_shell.ApplicationApi`。
+
+### OPT-17：Staging 补丁应用流程收敛复用
+
+- `scripts/build_staging.py` 提取统一辅助函数 `_apply_git_patches()`，支持目标目录位于 `commercial_root` 内部与外部两种场景，并由 `_apply_plugin_patches()` 与 `_apply_bridge_patch()` 复用。
+
 ## 验证、兼容与交付
 
 - 每项记录变更文件、复用实现、实际命令和结果；未执行检查明确标注。
@@ -134,6 +181,7 @@
 - CI首轮发现SBOM在Windows写入CRLF后被Git规范化为LF导致登记哈希失配；已改用固定LF计算，工作树/提交字节哈希一致，元数据复检通过。PR：https://github.com/c4znr7jpdy-arch/wechatrebot/pull/220；完整CI与合并结果由该PR留痕。
 - trace最终复查修复：日志路径每次读取解析，支持管理器先于运行日志启动；底层provider流确定性关闭；正常最终响应在yield前结束模型计时，fallback/step提前退出也关闭迭代器。使用真实runner方法和真实tenacity（test extras固定运行时9.1.4）覆盖正常/错误回退/关闭/取消/停止，最终6个定向文件97 passed。合并依赖变更时保留已有pytest/Jinja2/pytest-asyncio精确版本。
 - CI整合回归（run 44254030189）：player和frozen-manager通过；manager为6050 passed、1 failed、2 skipped，唯一失败为授权服务最小镜像未复制OPT-09新提取的模块。已在 `deploy/activation-service/Dockerfile` 补齐 `update_manifest.py`，复用已有最小镜像导入测试验证，`python -m pytest -q tests/test_admin_imports.py`：1 passed（1.12秒）；完整CI重新运行，最终状态以PR检查为准。
+- 2026-11-20（OPT-10..OPT-17）：在分支 `codex/perf-project-optimization-20261120` 完成 OPT-10..OPT-17 实现及回归测试补充（`test_portrait_cache.py`、`test_group_directory.py`、`test_plugin_center.py`、`test_local_incremental_update.py`、`test_staging_builder.py`、`test_runtime_config.py`、`test_control_center.py`、`test_runtime_port_consumers.py`、`chat_management_webui.cjs`）。修复 `PortraitCache.enrich` 在持有 `_LOCK` 时调用 `_POOL.submit` 的同步执行死锁风险；CI 首轮 `player`/`frozen-manager` 通过，`manager` 为 6174 passed、2 failed，发现状态轮询每 1.5s 调用 `syncGroupPolicyPolling()` 会重设 4s 定时器导致群策略轮询饥饿，已改为仅在无已武装定时器时调度并在 `chat_management_webui.cjs` 增加防重置回归（重跑 `test_chat_management_webui.py` + `test_chat_refresh_webui.py` 22 passed）；保留版本 `1.0.26`，不构建或发布安装包，完整 CI 待 PR checks。
 
 ## 已运行的主要定向命令
 
@@ -155,5 +203,10 @@ PowerShell执行前设置 `$env:PYTHONPATH=(Resolve-Path src).Path`。下面命�
 | 启动预算 | `python scripts/benchmark_manager_bootstrap.py --budget tests/fixtures/manager_bootstrap_budget.json` | 预算通过 |
 | 元数据 | `python scripts/validate_release_metadata.py` | ok=true |
 | 格式 | `git diff --check origin/master` | 通过 |
+| OPT-10..17 核心回归 | `python -m pytest -q tests/test_portrait_cache.py tests/test_group_directory.py tests/test_group_bridge.py tests/test_plugin_center.py tests/test_local_incremental_update.py tests/test_component_update_preparation.py tests/test_staging_builder.py tests/test_runtime_config.py tests/test_control_center.py tests/test_runtime_port_consumers.py` | 296 passed（64.22s） |
+| 壳层/UI/基准/卸载/管理导入 | `python -m pytest -q tests/test_app_shell.py tests/test_chat_refresh_webui.py tests/test_bootstrap_benchmark.py tests/test_core_settings.py tests/test_plugin_numeric_configuration.py tests/test_ui_skins.py tests/test_web_search_provider_compatibility.py tests/test_customer_console_ui_contract.py tests/test_uninstall_ui.py tests/test_update_progress.py tests/test_admin_imports.py` | 320 passed（74.20s） |
+| OPT-15 JS 语法与前端状态 | `node --check`（`app.js`/`chat-management.js`）及 5 项 `tests/*.cjs`（`chat_management_webui.cjs`、`activity_webui.cjs`、`history_webui.cjs`、`runtime_alerts_webui.cjs`、`subscription_webui.cjs`） | 全部通过 |
+| OPT-15 群聊浏览器回归 | `python -m pytest -q tests/test_chat_management_webui.py tests/test_chat_refresh_webui.py` | 22 passed（42.60s） |
+| OPT-10..17 源码与启动预算复检 | `compileall`、`source_inputs.py`、`validate_release_metadata.py`、`benchmark_manager_bootstrap.py --budget tests/fixtures/manager_bootstrap_budget.json` | 全部通过；`total=26.1ms`，预算0违规 |
 
 以上开发阶段没有执行本地全量测试、真实微信、正式安装器/载荷构建、发布或安装。GitHub CI包含冻结管理器自测，不等于已生成并发布客户安装包；后续交付状态见文首记录。

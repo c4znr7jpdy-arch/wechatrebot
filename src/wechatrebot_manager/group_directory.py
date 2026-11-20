@@ -42,11 +42,20 @@ class GroupDirectoryService:
         self.root = Path(install_root)
         self._lock = threading.Lock()
         self._account = ""
+        self._account_generation = 0
         self._snapshot = None
         self._next_refresh_at = 0.0
         self._last_error = ""
         self._portraits = PortraitCache(self.root)
         self._qrcodes: dict[str, tuple[float, dict[str, str]]] = {}
+
+    def _is_generation_current(self, account: str, generation: int) -> bool:
+        with self._lock:
+            return (
+                bool(account)
+                and self._account == account
+                and self._account_generation == generation
+            )
 
     def _connection(self):
         try:
@@ -69,12 +78,15 @@ class GroupDirectoryService:
         account = health.wechat_identity if health.wechat_logged_in else ""
         if not account:
             # Unknown identity must not expose a previous account's directory.
+            if self._account or self._snapshot is not None:
+                self._account_generation += 1
             self._account, self._snapshot = "", None
             self._next_refresh_at = 0.0
             self._last_error = ""
             self._qrcodes.clear()
             raise GroupDirectoryError("尚未确认微信登录账号，请先连接微信，再刷新群列表。")
         if account != self._account:
+            self._account_generation += 1
             self._account, self._snapshot = account, None
             self._next_refresh_at = 0.0
             self._last_error = ""
@@ -84,6 +96,7 @@ class GroupDirectoryService:
     def _clear_current_account(self, account: str, *, state_locked: bool) -> None:
         def clear() -> None:
             if self._account == account:
+                self._account_generation += 1
                 self._account, self._snapshot = "", None
                 self._next_refresh_at = 0.0
                 self._last_error = ""
@@ -160,45 +173,104 @@ class GroupDirectoryService:
         self._verify_current_account(port, account, state_locked=state_locked)
         return data
 
-    def list(self, refresh: bool = False, *, include_portraits: bool = True):
-        with self._lock:
-            try:
-                port, token, account = self._connection()
-                if refresh or time.monotonic() >= self._next_refresh_at:
-                    try:
-                        data = self._request(
+    def _enrich_portraits(
+        self,
+        account: str,
+        generation: int,
+        items: list[dict],
+        *,
+        port: int | None = None,
+        token: str = "",
+        force: bool = False,
+    ) -> list[dict]:
+        if not items:
+            return items
+        guard = (
+            (lambda a=account, g=generation: self._is_generation_current(a, g))
+            if port is not None
+            else None
+        )
+        with self._portraits.batch(account):
+            return [
+                self._portraits.enrich(
+                    account,
+                    item,
+                    str(item.get("group_id") or ""),
+                    (
+                        lambda group_id=item.get("group_id"): self._request(
                             port,
                             token,
                             account,
-                            "/api/manager/groups",
-                            state_locked=True,
-                        )
-                    except GroupDirectoryError as exc:
-                        self._next_refresh_at = time.monotonic() + self._RETRY_INTERVAL_SECONDS
-                        self._last_error = str(exc)
-                        raise
+                            f"/api/manager/contacts/{quote(str(group_id), safe='')}",
+                        ).get("item", {})
+                    )
+                    if port is not None
+                    else None,
+                    force=force,
+                    **(
+                        {"still_current": guard}
+                        if guard is not None
+                        else {}
+                    ),
+                )
+                for item in items
+            ]
+
+    @staticmethod
+    def _empty_snapshot(account: str) -> dict[str, object]:
+        return {"items": [], "total": 0, "account_id": account, "updated_at": None}
+
+    def list(self, refresh: bool = False, *, include_portraits: bool = True):
+        fetch_account = ""
+        fetch_generation = 0
+        try:
+            with self._lock:
+                port, token, account = self._connection()
+                generation = self._account_generation
+                needs_fetch = refresh or time.monotonic() >= self._next_refresh_at
+                if not needs_fetch:
+                    snapshot = copy.deepcopy(self._snapshot or self._empty_snapshot(account))
+                    stale = bool(self._last_error)
+                    message = self._last_error or "读取的是当前微信可提供的群信息，不会向群里发送消息。"
+            if needs_fetch:
+                fetch_account, fetch_generation = account, generation
+                data = self._request(
+                    port,
+                    token,
+                    account,
+                    "/api/manager/groups",
+                    state_locked=False,
+                )
+                fetch_account = ""
+                with self._lock:
+                    if self._account != account or self._account_generation != generation:
+                        raise GroupDirectoryError("微信账号已变化，请重新刷新群列表。")
                     self._snapshot = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
                     self._next_refresh_at = time.monotonic() + self._REFRESH_INTERVAL_SECONDS
                     self._last_error = ""
-                snapshot = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": account, "updated_at": None})
-                if include_portraits:
-                    snapshot["items"] = [self._portraits.enrich(
-                        account, item, str(item.get("group_id") or ""),
-                        lambda group_id=item.get("group_id"): self._request(
-                            port, token, account, f"/api/manager/contacts/{quote(str(group_id), safe='')}"
-                        ).get("item", {}), force=refresh,
-                    ) for item in snapshot["items"]]
-                return {**snapshot,
-                        "stale": bool(self._last_error),
-                        "message": self._last_error or "读取的是当前微信可提供的群信息，不会向群里发送消息。"}
-            except GroupDirectoryUnavailable:
-                raise
-            except GroupDirectoryError as exc:
-                fallback = copy.deepcopy(self._snapshot or {"items": [], "total": 0, "account_id": self._account, "updated_at": None})
-                if include_portraits:
-                    fallback["items"] = [self._portraits.enrich(self._account, item, str(item.get("group_id") or ""), None) for item in fallback["items"]]
-                return {**fallback,
-                        "stale": True, "message": str(exc)}
+                    snapshot = copy.deepcopy(self._snapshot)
+                    stale = False
+                    message = "读取的是当前微信可提供的群信息，不会向群里发送消息。"
+        except GroupDirectoryUnavailable:
+            raise
+        except GroupDirectoryError as exc:
+            with self._lock:
+                if fetch_account and self._account == fetch_account and self._account_generation == fetch_generation:
+                    self._next_refresh_at = time.monotonic() + self._RETRY_INTERVAL_SECONDS
+                    self._last_error = str(exc)
+                fallback_account = self._account
+                fallback_generation = self._account_generation
+                fallback = copy.deepcopy(self._snapshot or self._empty_snapshot(fallback_account))
+            if include_portraits:
+                fallback["items"] = self._enrich_portraits(
+                    fallback_account, fallback_generation, fallback["items"]
+                )
+            return {**fallback, "stale": True, "message": str(exc)}
+        if include_portraits:
+            snapshot["items"] = self._enrich_portraits(
+                account, generation, snapshot["items"], port=port, token=token, force=refresh
+            )
+        return {**snapshot, "stale": stale, "message": message}
 
     def members(self, group_id: str):
         if not isinstance(group_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+@chatroom", group_id):
