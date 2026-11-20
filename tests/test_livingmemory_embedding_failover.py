@@ -74,6 +74,7 @@ def coordinator(module, tmp_path, providers):
                 for kind in ("document", "graph")]
 
     instance._prepare = AsyncMock(side_effect=prepare)
+    instance._record_activation = AsyncMock()
     return instance, databases
 
 
@@ -176,6 +177,18 @@ def test_all_failed_candidates_preserve_indexes(failover_module, tmp_path):
     asyncio.run(run())
 
 
+def test_marker_failure_keeps_old_provider_and_indexes(failover_module, tmp_path):
+    async def run():
+        instance, databases = coordinator(failover_module, tmp_path, [Provider("first", failed=True), Provider("backup")])
+        instance._record_activation.side_effect = OSError("marker write failed")
+        with pytest.raises(failover_module.EmbeddingUnavailable):
+            await instance.write(lambda: databases[0].embedding_provider.get_embedding("memory"))
+        assert instance.provider.model == "first"
+        assert [db.embedding_storage.index for db in databases] == ["document", "graph"]
+        await instance.close()
+    asyncio.run(run())
+
+
 def test_cancelled_rebuild_keeps_old_indexes_and_unlocks(failover_module, tmp_path):
     async def run():
         instance, databases = coordinator(failover_module, tmp_path, [Provider("first", failed=True), Provider("backup")])
@@ -193,6 +206,25 @@ def test_cancelled_rebuild_keeps_old_indexes_and_unlocks(failover_module, tmp_pa
         assert [db.embedding_storage.index for db in databases] == ["document", "graph"]
         assert not instance.switching and not instance._lock.locked()
 
+    asyncio.run(run())
+
+
+def test_shutdown_allows_existing_write_compensation_to_finish(failover_module, tmp_path):
+    async def run():
+        instance, _ = coordinator(failover_module, tmp_path, [Provider("first")])
+        started, finish = asyncio.Event(), asyncio.Event()
+        compensation = AsyncMock()
+        async def write():
+            started.set()
+            await finish.wait()
+            await asyncio.shield(instance.write(compensation))
+        running = asyncio.create_task(instance.write(write))
+        await started.wait()
+        shutdown = asyncio.create_task(instance.close())
+        await asyncio.sleep(0)
+        finish.set()
+        await asyncio.wait_for(asyncio.gather(running, shutdown), 1)
+        compensation.assert_awaited_once()
     asyncio.run(run())
 
 

@@ -151,7 +151,6 @@ class EmbeddingFailover:
         self._queries = 0
         self._queries_done = asyncio.Event()
         self._queries_done.set()
-        self._owner = None
         self._scope = ContextVar("livingmemory_embedding_scope", default=None)
         self._mode = ContextVar("livingmemory_embedding_operation", default="query")
         self._recovery_task = None
@@ -192,7 +191,6 @@ class EmbeddingFailover:
                     return
         async with self._lock:
             await self._queries_done.wait()
-            self._owner = task
             scope = SimpleNamespace(task=task, active=True, children=asyncio.Lock())
             token = self._scope.set(scope)
             try:
@@ -200,7 +198,6 @@ class EmbeddingFailover:
             finally:
                 scope.active = False
                 self._scope.reset(token)
-                self._owner = None
 
     def attach(self, engine, validator):
         self._engine = engine
@@ -263,15 +260,15 @@ class EmbeddingFailover:
             raise
 
     async def write(self, operation):
-        if self._closed:
-            raise EmbeddingUnavailable("向量服务正在关闭。")
         scope = self._scope.get()
+        if self._closed and not (scope and scope.active):
+            raise EmbeddingUnavailable("向量服务正在关闭。")
         if not scope or not scope.active:
             pending = self._recovery_task
             if pending and not pending.done():
                 await asyncio.shield(pending)
         async with self.exclusive():
-            if self._closed:
+            if self._closed and not (scope and scope.active):
                 raise EmbeddingUnavailable("向量服务正在关闭。")
             token = self._mode.set("write")
             try:
@@ -280,8 +277,9 @@ class EmbeddingFailover:
                 self._mode.reset(token)
 
     async def maintenance(self, operation):
+        scope = self._scope.get()
         async with self.exclusive():
-            if self._closed:
+            if self._closed and not (scope and scope.active):
                 raise EmbeddingUnavailable("向量服务正在关闭。")
             token = self._mode.set("maintenance")
             try:
@@ -404,7 +402,17 @@ class EmbeddingFailover:
             prepared.append(storage)
         return prepared
 
+    async def _record_activation(self, candidate, prepared):
+        from .validators.index_validator import IndexValidator
+
+        for db, target in zip(self.databases, prepared, strict=True):
+            shadow = SimpleNamespace(embedding_provider=candidate, embedding_storage=target)
+            await IndexValidator(db.doc_store_path, shadow).record_provider_fingerprint()
+
     async def _activate(self, candidate, prepared):
+        # Persist markers before accepting writes in the new space. On a marker
+        # failure the old space stays active; a partial marker forces a rebuild.
+        await self._record_activation(candidate, prepared)
         # No await between replacing document/graph indexes and provider identity.
         for db, target in zip(self.databases, prepared, strict=True):
             storage = db.embedding_storage
@@ -415,15 +423,6 @@ class EmbeddingFailover:
         self.last_error = ""
         if self._engine:
             self._engine._invalidate_search_cache()
-        for db in self.databases:
-            try:
-                from .validators.index_validator import IndexValidator
-
-                await IndexValidator(db.doc_store_path, db).record_provider_fingerprint()
-            except Exception as error:
-                # The switch succeeded; a missing marker only causes a safe
-                # consistency check on the next startup, not another failover.
-                logger.warning("向量索引已切换，但指纹记录失败：%s", type(error).__name__)
 
     async def close(self):
         self._closed = True
