@@ -241,7 +241,7 @@ window.createModelServices = function (helpers) {
       if (generation === providerEditorGeneration && state.providerScreen === "editor") {
         if (state.providerDirty) {
           $("#providerNote").textContent = "提交时的配置已保存；之后的修改仍未保存，请再次保存。";
-        } else showProviderOverview(true);
+        }
       }
     } catch (error) {
       reportError(error);

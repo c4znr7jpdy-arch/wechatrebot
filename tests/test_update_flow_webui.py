@@ -468,7 +468,8 @@ def test_install_waits_for_real_settings_controller_operation(update_page, opera
     if operation == "core_read":
         expect(page.locator('#refreshCore')).to_be_enabled()
     else:
-        expect(page.locator('#providerEditorPage')).to_be_hidden()
+        expect(page.locator('#saveProvider')).to_be_enabled()
+        expect(page.locator('#providerEditorPage')).to_be_visible()
     page.locator('#modalConfirm').click()
     expect(page.locator('#modalBackdrop')).to_be_hidden()
     assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
