@@ -289,6 +289,62 @@ def test_graph_maintenance_failure_waits_before_switching(failover_module, tmp_p
     asyncio.run(run())
 
 
+def test_archived_restore_retries_after_rollback_before_provider_switch(failover_module, patched_plugin, tmp_path):
+    from contextlib import asynccontextmanager
+    import json
+    from types import MethodType
+
+    async def run():
+        primary, backup = Provider("primary"), Provider("backup")
+        primary.get_embedding = AsyncMock(side_effect=[[1.0, 0.0], RuntimeError("graph failed")])
+        backup.get_embedding = AsyncMock(return_value=[0.0, 1.0])
+        instance, databases = coordinator(failover_module, tmp_path, [primary, backup])
+        storage = databases[0].embedding_storage
+        storage.index = {}
+        memory = {"text": "archived", "metadata": {"status": "archived"}}
+        async def insert(vector, identifier):
+            storage.index[identifier] = vector.tolist()
+        async def delete(identifiers):
+            for identifier in identifiers:
+                storage.index.pop(identifier, None)
+        storage.insert, storage.delete = insert, delete
+        async def execute(sql, values):
+            if sql.startswith("UPDATE documents"):
+                memory["metadata"] = json.loads(values[0])
+        async def index_graph(*args):
+            await databases[1].embedding_provider.get_embedding("graph")
+        engine = NS(
+            faiss_db=databases[0], db_connection=NS(execute=execute, commit=AsyncMock()),
+            get_memory=AsyncMock(return_value=memory), _safe_json_dict=lambda value: dict(value),
+            bm25_retriever=NS(add_document=AsyncMock()), atom_store=None,
+            graph_memory_manager=NS(index_memory=index_graph, delete_memory=AsyncMock()),
+            _invalidate_search_cache=Mock(),
+        )
+        @asynccontextmanager
+        async def transaction():
+            yield engine.db_connection
+        engine._write_transaction = transaction
+        source = (patched_plugin / "core/managers/memory_engine_batch.py").read_text("utf-8")
+        method = _runtime_function(source, "restore_memory", {
+            "json": json, "time": __import__("time"), "classify_atoms": lambda **kwargs: [],
+            "clamp_float": lambda value, default=0: default if value is None else float(value),
+        })
+        engine.restore_memory = MethodType(method, engine)
+        instance.attach(engine, NS(rebuild_indexes=AsyncMock()))
+        async def prepare(candidate):
+            assert memory["metadata"]["status"] == "archived"
+            assert storage.index == {}  # The first restore has fully rolled back.
+            return [NS(index={}, dimension=2, path=db.embedding_storage.path) for db in databases]
+        instance._prepare = AsyncMock(side_effect=prepare)
+        assert await engine.restore_memory(1) is True
+        assert instance.provider is backup
+        assert storage.index == {1: [0.0, 1.0]}
+        assert memory["metadata"]["status"] == "active"
+        engine.graph_memory_manager.delete_memory.assert_awaited_once_with(1)
+        await instance.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("invalid", [None, [float("nan")], ["secret"], []])
 def test_initial_unknown_dimension_uses_available_candidate(failover_module, invalid):
     async def run():

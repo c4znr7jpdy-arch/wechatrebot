@@ -214,6 +214,8 @@ class EmbeddingFailover:
                 operation = lambda: _original(*args, **kwargs)
                 if _name == "rebuild_graph_index":
                     return await self.maintenance(operation)
+                if _name == "restore_memory":
+                    return await self.restore(operation)
                 return await self.write(operation)
 
             setattr(engine, name, mutate)
@@ -286,6 +288,18 @@ class EmbeddingFailover:
                 return await operation()
             finally:
                 self._mode.reset(token)
+
+    async def restore(self, operation):
+        # Archived documents enter the active corpus only after graph writes.
+        # Finish rollback before rebuilding, then retry the whole restoration.
+        try:
+            return await self.write(lambda: self.maintenance(operation))
+        except EmbeddingUnavailable:
+            pending = self._recovery_task
+            if self._closed or pending is None:
+                raise
+            await asyncio.shield(pending)
+            return await self.write(lambda: self.maintenance(operation))
 
     async def embed(self, method, *args, **kwargs):
         if not self.ready and self._mode.get() == "write":
