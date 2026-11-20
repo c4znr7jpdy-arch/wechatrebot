@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 from typing import Any, Callable
 
+from .config_lock import CONFIG_FILE_LOCK
 from .json_io import write_json_atomic
 from .plugin_center import EngineApiClient, EngineUnavailableError, PluginCenterError
 
@@ -221,7 +222,6 @@ class ExperienceService:
         return state
 
     def save_persona(self, values: dict[str, Any]) -> dict[str, Any]:
-        state = self._state()
         scope, scope_id = self._scope(values)
         tone = str(values.get("tone") or "natural").strip()
         if tone not in {"natural", "warm", "professional", "lively"}:
@@ -264,16 +264,17 @@ class ExperienceService:
             lengths["normal_reply_max_chars"] = normal
             lengths["focus_reply_max_chars"] = max(focus, normal)
 
-        apply_state = self._apply_plugin(ANGEL_HEART_MODULE, update)
-        if scope == "global":
-            state["persona"] = persona
-        else:
-            state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["persona"] = persona
-        self._write_state(state)
+        with CONFIG_FILE_LOCK:
+            state = self._state()
+            apply_state = self._apply_plugin(ANGEL_HEART_MODULE, update)
+            if scope == "global":
+                state["persona"] = persona
+            else:
+                state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["persona"] = persona
+            self._write_state(state)
         return {**persona, "scope": scope, "scope_id": scope_id, "apply_state": apply_state}
 
     def save_memory(self, values: dict[str, Any]) -> dict[str, Any]:
-        state = self._state()
         scope, scope_id = self._scope(values)
         enabled = bool(values.get("enabled", True))
         recall_mode = str(values.get("recall_mode") or "smart").strip()
@@ -306,16 +307,17 @@ class ExperienceService:
             reflection = _nested(config, "reflection_engine")
             reflection["summary_trigger_rounds"] = memory["summary_trigger_rounds"]
 
-        apply_state = self._apply_plugin(LIVING_MEMORY_MODULE, update)
-        if scope == "global":
-            state["memory"] = memory
-        else:
-            state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["memory"] = memory
-        self._write_state(state)
+        with CONFIG_FILE_LOCK:
+            state = self._state()
+            apply_state = self._apply_plugin(LIVING_MEMORY_MODULE, update)
+            if scope == "global":
+                state["memory"] = memory
+            else:
+                state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["memory"] = memory
+            self._write_state(state)
         return {**memory, "scope": scope, "scope_id": scope_id, "apply_state": apply_state}
 
     def save_emotion(self, values: dict[str, Any]) -> dict[str, Any]:
-        state = self._state()
         scope, scope_id = self._scope(values)
         emotion = {
             "enabled": bool(values.get("enabled", True)),
@@ -351,12 +353,14 @@ class ExperienceService:
             runtime["enable_llm_hooks"] = emotion["enabled"]
             runtime["llm_hook_profile"] = "compact"
 
-        apply_state = self._apply_plugin(EMOTION_MODULE, update)
-        if scope == "global":
-            state["emotion"] = emotion
-        else:
-            state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["emotion"] = emotion
-        self._write_state(state)
+        with CONFIG_FILE_LOCK:
+            state = self._state()
+            apply_state = self._apply_plugin(EMOTION_MODULE, update)
+            if scope == "global":
+                state["emotion"] = emotion
+            else:
+                state["scopes"].setdefault(scope, {}).setdefault(scope_id, {})["emotion"] = emotion
+            self._write_state(state)
         return {**emotion, "scope": scope, "scope_id": scope_id, "apply_state": apply_state}
 
     def preview(self, values: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -388,9 +392,10 @@ class ExperienceService:
         }
 
     def finish_onboarding(self) -> dict[str, Any]:
-        state = self._state()
-        state["onboarding_complete"] = True
-        self._write_state(state)
+        with CONFIG_FILE_LOCK:
+            state = self._state()
+            state["onboarding_complete"] = True
+            self._write_state(state)
         return {"onboarding_complete": True}
 
 

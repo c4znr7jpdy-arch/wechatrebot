@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from html.parser import HTMLParser
 import json
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -14,7 +15,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from wechatrebot_manager import engine_api, plugin_center, plugin_center_web
+from wechatrebot_manager import customer_config, engine_api, plugin_center, plugin_center_web
 
 from wechatrebot_manager.brand import BrandProfile, save_brand_profile
 from wechatrebot_manager.plugin_center import (
@@ -1895,6 +1896,28 @@ def test_local_web_handler_serves_assets_and_rejects_foreign_mutation() -> None:
         thread.join(timeout=2)
 
 
+def test_manager_static_allowlist_covers_index_scripts_and_stylesheets() -> None:
+    class PageDependencies(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.paths = set()
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            source = values.get("src") if tag == "script" else None
+            if tag == "link" and values.get("rel") == "stylesheet":
+                source = values.get("href")
+            if source and not source.startswith(("http:", "https:", "//")):
+                self.paths.add("/" + source.partition("?")[0].lstrip("/"))
+
+    assets = Path(plugin_center.__file__).with_name("app_webui")
+    page = PageDependencies()
+    page.feed((assets / "index.html").read_text("utf-8"))
+    registered = plugin_center_web._MANAGER_WEB_ASSETS | plugin_center_web._SHARED_STATIC_ASSETS.keys()
+    assert not (page.paths - registered)
+    assert all((assets / path.lstrip("/")).is_file() for path in page.paths)
+
+
 @pytest.mark.parametrize("frozen", [False, True])
 def test_dedicated_window_serves_shared_theme_dependencies(tmp_path: Path, monkeypatch, frozen: bool) -> None:
     source = Path(plugin_center.__file__).with_name("app_webui")
@@ -2113,7 +2136,7 @@ def test_plugin_page_upload_forwards_large_audio_to_the_selected_feature() -> No
 
 
 def test_has_visible_features_checks_manifest_without_full_catalog(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install = tmp_path / "empty_install"
     wechat = tmp_path / "Weixin.exe"
@@ -2131,6 +2154,9 @@ def test_has_visible_features_checks_manifest_without_full_catalog(
     configured_root = tmp_path / "configured"
     configured_root.mkdir()
     configured_install, _ = _install(configured_root)
+    monkeypatch.setattr(
+        customer_config, "_object", lambda _path: pytest.fail("read engine settings")
+    )
     assert PluginCenterService(configured_install).has_visible_features() is True
 
 

@@ -125,6 +125,7 @@ class GroupDirectoryService:
         *,
         state_locked: bool = False,
         max_response_bytes: int = 4 * 1024 * 1024,
+        verify_account: bool = True,
     ):
         if isinstance(max_response_bytes, bool) or not 1 <= max_response_bytes <= 32 * 1024 * 1024:
             raise ValueError("响应大小上限无效")
@@ -170,7 +171,8 @@ class GroupDirectoryService:
             raise GroupDirectoryError("未收到当前账号的群信息，请重新连接后刷新。")
         if not isinstance(data.get("items"), list):
             raise GroupDirectoryError("群信息格式不正确，请稍后重试。")
-        self._verify_current_account(port, account, state_locked=state_locked)
+        if verify_account:
+            self._verify_current_account(port, account, state_locked=state_locked)
         return data
 
     def _enrich_portraits(
@@ -202,6 +204,7 @@ class GroupDirectoryService:
                             token,
                             account,
                             f"/api/manager/contacts/{quote(str(group_id), safe='')}",
+                            verify_account=False,
                         ).get("item", {})
                     )
                     if port is not None

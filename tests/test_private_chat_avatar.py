@@ -1,6 +1,8 @@
+from io import BytesIO
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -34,7 +36,7 @@ def test_contacts_are_cached_and_cleared_when_account_changes(
 ) -> None:
     service, account, calls = _contact_service(tmp_path, monkeypatch)
 
-    def request(_port, _token, identity, path):
+    def request(_port, _token, identity, path, **_options):
         calls.append(path)
         user_ids = [part.split("=", 1)[1] for part in path.partition("?")[2].split("&")]
         return {
@@ -64,10 +66,51 @@ def test_contacts_are_cached_and_cleared_when_account_changes(
     assert calls[-1] == "/api/manager/contacts?id=wxid_a"
 
 
+@pytest.mark.parametrize("switch_account", [False, True])
+def test_contact_batches_verify_account_once_before_committing(
+    tmp_path: Path, monkeypatch, switch_account: bool
+) -> None:
+    service, account, calls = _contact_service(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "_BATCH_SIZE", 1)
+    probe = group_directory.probe_bridge_health
+
+    def tracked_probe(**options):
+        calls.append("health")
+        return probe(**options)
+
+    def open_contacts(request, *, timeout):
+        query = parse_qs(urlsplit(request.full_url).query)
+        user_id = query["id"][0]
+        calls.append(user_id)
+        payload = {
+            "ok": True,
+            "data": {"account_id": account[0], "items": [{"user_id": user_id}]},
+        }
+        if switch_account and user_id == "wxid_second":
+            account[0] = "different-account"
+        return BytesIO(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(group_directory, "probe_bridge_health", tracked_probe)
+    monkeypatch.setattr(
+        group_directory, "build_opener", lambda *_handlers: SimpleNamespace(open=open_contacts)
+    )
+
+    if switch_account:
+        with pytest.raises(group_directory.GroupDirectoryError, match="账号已变化"):
+            service.contacts(["wxid_first", "wxid_second"])
+        assert not service._contacts
+        assert not service._contact_retry_at
+    else:
+        assert set(service.contacts(["wxid_first", "wxid_second"])) == {
+            "wxid_first", "wxid_second"
+        }
+    assert calls == ["health", "wxid_first", "wxid_second", "health"]
+
+
 def test_missing_contact_uses_cooldown_before_retry(tmp_path: Path, monkeypatch) -> None:
     service, _, calls = _contact_service(tmp_path, monkeypatch)
 
-    def request(_port, _token, identity, path):
+    def request(_port, _token, identity, path, **_options):
         calls.append(path)
         return {"account_id": identity, "items": [], "total": 0}
 

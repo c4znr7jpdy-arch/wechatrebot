@@ -590,9 +590,12 @@ def test_config_file_lock_serializes_runtime_and_customer_config_writes(
 ) -> None:
     import threading
     from concurrent.futures import ThreadPoolExecutor
-    from wechatrebot_manager import customer_config, runtime_config
+    from wechatrebot_manager import brand, customer_config, experience, plugin_center, runtime_config
 
     assert customer_config.CONFIG_FILE_LOCK is runtime_config.CONFIG_FILE_LOCK
+    assert brand.CONFIG_FILE_LOCK is runtime_config.CONFIG_FILE_LOCK
+    assert experience.CONFIG_FILE_LOCK is runtime_config.CONFIG_FILE_LOCK
+    assert plugin_center.CONFIG_FILE_LOCK is runtime_config.CONFIG_FILE_LOCK
 
     install = tmp_path / "install"
     wechat = tmp_path / "Weixin.exe"

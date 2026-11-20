@@ -21,6 +21,7 @@ if str(SOURCE_ROOT) not in sys.path:
 
 from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
 from wechatrebot_manager import hook_recall_patch
+from build_runtime import CORE_ASTRBOT_PATCHES
 from source_inputs import verify_source_inputs
 from wechatrebot_manager.licensing.bundle import validate_runtime_bundle
 
@@ -496,22 +497,9 @@ def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[st
     _validate_ffmpeg_runtime(runtime_root, commercial_root, runtime_manifest.get("ffmpeg"))
     validate_runtime_bundle(commercial_root, runtime_root / "python/Lib/site-packages",
                             runtime_manifest.get("licensing_bundle_sha256"))
-    if runtime_manifest.get("astrbot_license_patch_sha256") != _sha256(
-        commercial_root / "patches/astrbot-4.26.6-license.patch"
-    ):
-        raise RuntimeError("Runtime authorization patch is stale; rebuild the runtime")
-    if runtime_manifest.get("astrbot_background_permissions_patch_sha256") != _sha256(
-        commercial_root / "patches/astrbot-4.26.6-background-permissions.patch"
-    ):
-        raise RuntimeError("Runtime background permissions are stale; rebuild the runtime")
-    if runtime_manifest.get("astrbot_patch_sha256") != _sha256(
-        commercial_root / "patches/astrbot-4.26.6-wechat.patch"
-    ):
-        raise RuntimeError("Runtime WeChat patch is stale; rebuild the runtime")
-    if runtime_manifest.get("astrbot_outbound_policy_patch_sha256") != _sha256(
-        commercial_root / "patches/astrbot-4.26.6-outbound-policy.patch"
-    ):
-        raise RuntimeError("Runtime outbound policy patch is stale; rebuild the runtime")
+    for key, (relative_path, label) in CORE_ASTRBOT_PATCHES.items():
+        if runtime_manifest.get(key) != _sha256(commercial_root / relative_path):
+            raise RuntimeError(f"Runtime {label} fingerprint is stale; rebuild the runtime")
     return runtime_manifest
 
 
