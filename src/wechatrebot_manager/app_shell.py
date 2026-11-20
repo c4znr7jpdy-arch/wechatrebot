@@ -844,7 +844,11 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         groups = {"items": [], "stale": True, "account_id": ""}
         if account_id and directory_service is not None:
             try:
-                candidate = directory_service.list(False)
+                candidate = (
+                    directory_service.list(False, include_portraits=False)
+                    if isinstance(directory_service, GroupDirectoryService)
+                    else directory_service.list(False)
+                )
                 if isinstance(candidate, dict) and candidate.get("account_id") == account_id:
                     groups = candidate
             except (OSError, GroupDirectoryError):
@@ -855,11 +859,17 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         group_items = group_items if isinstance(group_items, list) else []
         group_stale = bool(groups.get("stale")) if isinstance(groups, dict) else True
         try:
-            catalog = self._features.catalog() if getattr(self, "_features", None) is not None else {}
-            feature_items = catalog.get("plugins") if isinstance(catalog, dict) else []
+            features = getattr(self, "_features", None)
+            if features is None:
+                has_features = False
+            elif hasattr(features, "has_visible_features"):
+                has_features = bool(features.has_visible_features())
+            else:
+                catalog = features.catalog()
+                feature_items = catalog.get("plugins") if isinstance(catalog, dict) else []
+                has_features = bool(isinstance(feature_items, list) and feature_items)
         except (OSError, ValueError, PluginCenterError):
-            feature_items = []
-        feature_items = feature_items if isinstance(feature_items, list) else []
+            has_features = False
         online = bool(view.get("online"))
         items = [
             {
@@ -893,9 +903,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             {
                 "id": "core",
                 "label": "核心功能",
-                "status": "ready" if online and feature_items else "offline" if not online else "needs_config",
-                "detail": "机器人核心和功能目录已可检查。" if online and feature_items else "启动机器人后检查核心功能是否可用。",
-                "next_step": "继续检查" if online and feature_items else "启动机器人并检查功能",
+                "status": "ready" if online and has_features else "offline" if not online else "needs_config",
+                "detail": "机器人核心和功能目录已可检查。" if online and has_features else "启动机器人后检查核心功能是否可用。",
+                "next_step": "继续检查" if online and has_features else "启动机器人并检查功能",
             },
         ]
         complete = all(item["status"] == "ready" for item in items)

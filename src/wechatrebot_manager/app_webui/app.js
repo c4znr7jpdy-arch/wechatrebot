@@ -742,6 +742,7 @@
       state.groupMemberLoad += 1;
       clearPendingGroupMemberLoading();
     }
+    syncGroupPolicyPolling();
     $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
     $$(".page").forEach((item) => item.classList.toggle("active", item.id === `page-${page}`));
     $("#pageTitle").textContent = PAGE_TITLES[page];
@@ -1308,6 +1309,7 @@
     window.addEventListener("focus", () => { refreshVisibleFeatureState().catch(reportError); });
     window.addEventListener("focus", () => { refreshVisibleChatData().catch(reportError); });
     document.addEventListener("visibilitychange", () => {
+      syncGroupPolicyPolling();
       if (document.visibilityState === "visible") refreshVisibleChatData().catch(reportError);
     });
     $("#modalBackdrop").addEventListener("keydown", (event) => {
@@ -1440,7 +1442,7 @@
     api: (...args) => api(...args), avatarMarkup, bindAvatarFallbacks, copyText, escapeHtml, state,
   });
 
-  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab, updateChatManagementAccount } = createPageController("createChatManagement", {
+  const { clearPendingGroupMemberLoading, hasChatDrafts, isPrivatePolicySaving, invalidateChatManagementContext, loadContacts, loadGroups, renderContacts, renderGroupInspector, renderGroups, selectChatManagementTab, syncGroupPolicyPolling, updateChatManagementAccount } = createPageController("createChatManagement", {
     $,
     $$,
     CONTACT_PAGE_SIZE,

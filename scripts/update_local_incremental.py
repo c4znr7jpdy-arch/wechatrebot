@@ -33,6 +33,7 @@ BASE_INPUTS = {
     "release/hook-binaries.json": "legal/hook-binaries.json",
     "patches/astrbot-4.26.6-wechat.patch": "legal/corresponding-source/astrbot-4.26.6-wechat.patch",
     "patches/astrbot-4.26.6-outbound-policy.patch": "legal/corresponding-source/astrbot-4.26.6-outbound-policy.patch",
+    "patches/astrbot-4.26.6-background-permissions.patch": "legal/corresponding-source/astrbot-4.26.6-background-permissions.patch",
     "patches/astrbot-4.26.6-license.patch": "legal/corresponding-source/astrbot-4.26.6-license.patch",
     **{f"src/wechatrebot_manager/{name}": f"runtime/python/Lib/site-packages/wechatrebot_manager/{name}"
        for name in RUNTIME_FILES},

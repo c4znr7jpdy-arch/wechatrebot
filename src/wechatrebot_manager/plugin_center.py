@@ -89,6 +89,7 @@ _PUBLIC_PLUGIN_ID = re.compile(r"^feature-[a-f0-9]{16}$")
 
 
 _CONFIG_WRITE_LOCK = threading.RLock()
+_DEFAULT_ENGINE_IS_AVAILABLE = EngineApiClient.is_available
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,15 +136,37 @@ class PluginCenterService:
         self.engine = EngineApiClient(self.install_root)
 
     def _runtime_plugin_states(self) -> tuple[bool, dict[str, bool]]:
-        if not self.engine.is_available():
+        # Avoid a redundant pre-flight round trip unless a test/caller replaced
+        # `is_available` with a custom stub.
+        default_probe = (
+            isinstance(self.engine, EngineApiClient)
+            and type(self.engine).is_available is _DEFAULT_ENGINE_IS_AVAILABLE
+            and "is_available" not in self.engine.__dict__
+        )
+        if not default_probe and not self.engine.is_available():
             return False, {}
         try:
             return True, self.engine.plugin_states()
         except EngineUnavailableError:
             return False, {}
 
+    def has_visible_features(self) -> bool:
+        installed = {item.module_name for item in load_plugins(self.install_root)}
+        policies = load_delivery_features(self.install_root)
+        if policies is None:
+            return any(name != _ANGEL_HEART_MODULE for name in installed)
+        return any(
+            policy.module != _ANGEL_HEART_MODULE
+            and policy.module in installed
+            and policy.visible
+            for policy in policies
+        )
+
     def _catalog_items(
-        self, enabled_overrides: dict[str, bool] | None = None
+        self,
+        enabled_overrides: dict[str, bool] | None = None,
+        *,
+        target_public_id: str | None = None,
     ) -> tuple[PluginCatalogItem, ...]:
         root = _plugin_root(self.install_root)
         installed = {item.module_name: item for item in load_plugins(self.install_root)}
@@ -158,69 +181,80 @@ class PluginCenterService:
                 if policy.module in installed and policy.visible
             ]
 
+        setu_public_id = _public_plugin_id(_SETU_FEATURE_KEY) if target_public_id else ""
         result: list[PluginCatalogItem] = []
         for raw_plugin, policy in ordered:
             module_name = str(raw_plugin.module_name)
+            include_primary = (
+                target_public_id is None
+                or _public_plugin_id(module_name) == target_public_id
+            )
+            include_setu = module_name == _SETU_BACKING_MODULE and (
+                target_public_id is None or target_public_id == setu_public_id
+            )
+            if not include_primary and not include_setu:
+                continue
             plugin_dir = root / module_name
             raw_schema = _read_object(plugin_dir / "_conf_schema.json")
-            exposes_schema = (
-                module_name not in _MANAGER_PAGE_ONLY_MODULES
-                and (
-                    policy is None
-                    or policy.exposes_schema
-                    or module_name in _MANAGER_SCHEMA_POLICY_OVERRIDES
-                )
-            )
-            exposes_pages = (
-                (policy is None or policy.exposes_pages)
-                and module_name not in _MANAGER_HIDDEN_PAGE_MODULES
-            )
-            schema, profile = _project_customer_schema(
-                module_name, raw_schema if exposes_schema else {}
-            )
-            basic_schema, model_schema = _split_schema(schema)
-            pages_root = plugin_dir / "pages"
-            pages = (
-                tuple(
-                    path.name
-                    for path in sorted(
-                        pages_root.iterdir(), key=lambda item: item.name.casefold()
+            if include_primary:
+                exposes_schema = (
+                    module_name not in _MANAGER_PAGE_ONLY_MODULES
+                    and (
+                        policy is None
+                        or policy.exposes_schema
+                        or module_name in _MANAGER_SCHEMA_POLICY_OVERRIDES
                     )
-                    if path.is_dir()
-                    and _PAGE_ID.fullmatch(path.name)
-                    and (path / "index.html").is_file()
                 )
-                if exposes_pages and pages_root.is_dir()
-                else ()
-            )
-            result.append(
-                PluginCatalogItem(
-                    module_name=module_name,
-                    display_name=(policy.display_name if policy else raw_plugin.display_name),
-                    enabled=(
-                        enabled_overrides.get(module_name, False)
-                        if enabled_overrides is not None
-                        else bool(raw_plugin.enabled)
-                    ),
-                    configurable=bool(schema),
-                    field_count=_field_count(basic_schema),
-                    model_field_count=_field_count(model_schema),
-                    pages=pages,
-                    configuration=(
-                        "none"
-                        if module_name in _MANAGER_NO_CONFIGURATION_MODULES
-                        else "schema"
-                        if module_name in _MANAGER_HIDDEN_PAGE_MODULES
-                        else
-                        "page"
-                        if module_name in _MANAGER_PAGE_ONLY_MODULES
-                        else (policy.configuration if policy else "schema-and-page")
-                    ),
-                    description=(policy.description if policy else ""),
-                    simplified=profile is not None,
+                exposes_pages = (
+                    (policy is None or policy.exposes_pages)
+                    and module_name not in _MANAGER_HIDDEN_PAGE_MODULES
                 )
-            )
-            if module_name == _SETU_BACKING_MODULE:
+                schema, profile = _project_customer_schema(
+                    module_name, raw_schema if exposes_schema else {}
+                )
+                basic_schema, model_schema = _split_schema(schema)
+                pages_root = plugin_dir / "pages"
+                pages = (
+                    tuple(
+                        path.name
+                        for path in sorted(
+                            pages_root.iterdir(), key=lambda item: item.name.casefold()
+                        )
+                        if path.is_dir()
+                        and _PAGE_ID.fullmatch(path.name)
+                        and (path / "index.html").is_file()
+                    )
+                    if exposes_pages and pages_root.is_dir()
+                    else ()
+                )
+                result.append(
+                    PluginCatalogItem(
+                        module_name=module_name,
+                        display_name=(policy.display_name if policy else raw_plugin.display_name),
+                        enabled=(
+                            enabled_overrides.get(module_name, False)
+                            if enabled_overrides is not None
+                            else bool(raw_plugin.enabled)
+                        ),
+                        configurable=bool(schema),
+                        field_count=_field_count(basic_schema),
+                        model_field_count=_field_count(model_schema),
+                        pages=pages,
+                        configuration=(
+                            "none"
+                            if module_name in _MANAGER_NO_CONFIGURATION_MODULES
+                            else "schema"
+                            if module_name in _MANAGER_HIDDEN_PAGE_MODULES
+                            else
+                            "page"
+                            if module_name in _MANAGER_PAGE_ONLY_MODULES
+                            else (policy.configuration if policy else "schema-and-page")
+                        ),
+                        description=(policy.description if policy else ""),
+                        simplified=profile is not None,
+                    )
+                )
+            if include_setu:
                 setu_schema = _setu_schema(raw_schema)
                 result.append(
                     PluginCatalogItem(
@@ -282,7 +316,7 @@ class PluginCenterService:
     ) -> PluginCatalogItem:
         if not _PUBLIC_PLUGIN_ID.fullmatch(public_id):
             raise PluginCenterError("功能标识无效。")
-        for plugin in self._catalog_items(enabled_overrides):
+        for plugin in self._catalog_items(enabled_overrides, target_public_id=public_id):
             if _public_plugin_id(plugin.catalog_key) == public_id:
                 return plugin
         raise PluginCenterError("所选功能不存在或尚未交付。")

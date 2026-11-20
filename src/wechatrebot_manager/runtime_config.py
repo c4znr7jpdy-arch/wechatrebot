@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 import re
 import secrets
+import threading
 
 from .brand import BrandProfile
 from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
@@ -20,6 +21,7 @@ from .retired_plugins import purge_retired_plugins
 
 
 _ADMIN_ID = re.compile(r"^[A-Za-z0-9_@.-]{3,128}$")
+CONFIG_FILE_LOCK = threading.RLock()
 
 
 def normalize_admin_id(value: str | None) -> str | None:
@@ -554,6 +556,34 @@ def _sync_emotion_config(astrbot_data_root: Path) -> None:
 
 
 def write_runtime_configs(
+    install_root: str | Path,
+    wechat_exe_path: str | Path | None = None,
+    *,
+    wechat_version: str | None = None,
+    ports: RuntimePorts | None = None,
+    brand_profile: BrandProfile | None = None,
+    apply_brand_persona: bool = True,
+    provider_profile: OpenAIProviderProfile | None = None,
+    provider_make_default: bool = True,
+    admin_id: str | None = None,
+    admin_ids: list[str] | tuple[str, ...] | None = None,
+) -> None:
+    with CONFIG_FILE_LOCK:
+        _write_runtime_configs_locked(
+            install_root,
+            wechat_exe_path,
+            wechat_version=wechat_version,
+            ports=ports,
+            brand_profile=brand_profile,
+            apply_brand_persona=apply_brand_persona,
+            provider_profile=provider_profile,
+            provider_make_default=provider_make_default,
+            admin_id=admin_id,
+            admin_ids=admin_ids,
+        )
+
+
+def _write_runtime_configs_locked(
     install_root: str | Path,
     wechat_exe_path: str | Path | None = None,
     *,

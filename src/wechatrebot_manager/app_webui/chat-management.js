@@ -49,8 +49,37 @@ window.createChatManagement = function (helpers) {
   const groupMemberRequestQueue = [];
   const groupMemberLoadsInFlight = new Set();
   let groupPolicyPollBusy = false;
+  let groupPolicyPollTimer = 0;
   const groupPolicySaves = new Set();
   state.dismissedHomeSetupAlerts = readHomeSetupAlertDismissals();
+
+  function shouldPollGroupPolicy() {
+    const groupId = state.selectedGroup;
+    return Boolean(
+      state.activePage === "groups"
+      && state.chatManagementTab === "groups"
+      && !window.document?.hidden
+      && canUseChatAccount()
+      && groupId
+      && state.groupAccount
+      && state.groupPolicies[groupId]?.policy
+      && !groupPolicySaves.has(groupId)
+      && $("#modalBackdrop")?.hidden !== false
+    );
+  }
+
+  function stopGroupPolicyPolling() {
+    if (!groupPolicyPollTimer) return;
+    window.clearTimeout(groupPolicyPollTimer);
+    groupPolicyPollTimer = 0;
+  }
+
+  function syncGroupPolicyPolling() {
+    stopGroupPolicyPolling();
+    if (!groupPolicyPollBusy && shouldPollGroupPolicy()) {
+      groupPolicyPollTimer = window.setTimeout(pollSelectedGroupPolicy, 4000);
+    }
+  }
 
   function groupPolicyNote(groupId) {
     if (groupDrafts[groupId]?.policyConflict) return "本群功能或规则已在机器人对话中修改；未保存的修改已保留，请重新读取规则后核对再保存。";
@@ -77,14 +106,13 @@ window.createChatManagement = function (helpers) {
   }
 
   async function pollSelectedGroupPolicy() {
+    groupPolicyPollTimer = 0;
     if (groupPolicyPollBusy) return;
     groupPolicyPollBusy = true;
     try {
       const groupId = state.selectedGroup, account = state.groupAccount;
       const policies = state.groupPolicies;
-      if (state.activePage !== "groups" || state.chatManagementTab !== "groups" || window.document?.hidden
-          || !canUseChatAccount() || !groupId || !account || !policies[groupId]?.policy || groupPolicySaves.has(groupId)
-          || $("#modalBackdrop")?.hidden === false || !$("#groupPolicyForm")) return;
+      if (!shouldPollGroupPolicy() || !$("#groupPolicyForm")) return;
       const generation = chatContextGeneration;
       const result = await api("get_group_policy", account, groupId, true);
       if (generation !== chatContextGeneration || state.groupAccount !== account || state.groupPolicies !== policies
@@ -116,7 +144,7 @@ window.createChatManagement = function (helpers) {
       return false;
     } finally {
       groupPolicyPollBusy = false;
-      window.setTimeout(pollSelectedGroupPolicy, 4000);
+      syncGroupPolicyPolling();
     }
   }
   function hasGroupMemberCount(value) {
@@ -176,6 +204,7 @@ window.createChatManagement = function (helpers) {
     if (changed && state.chatManagementTab === tab) {
       window.managerMotion?.enter($(tab === "groups" ? "#groupManagementPanel" : "#privateManagementPanel"));
     }
+    syncGroupPolicyPolling();
   }
 
   function groupDirectoryStatus(data, failed = false) {
@@ -223,6 +252,7 @@ window.createChatManagement = function (helpers) {
   function invalidateChatManagementContext() {
     chatContextGeneration += 1;
     clearGroupRefreshRetry();
+    stopGroupPolicyPolling();
     state.groupMemberLoad += 1;
     state.contactLoad += 1;
     state.groupsLoaded = state.contactsLoaded = false;
@@ -261,7 +291,12 @@ window.createChatManagement = function (helpers) {
       invalidateChatManagementContext();
     }
     const blocked = unavailable || !account;
-    if (blocked) clearGroupRefreshRetry();
+    if (blocked) {
+      clearGroupRefreshRetry();
+      stopGroupPolicyPolling();
+    } else {
+      syncGroupPolicyPolling();
+    }
     for (const selector of ["#groupManagementPanel", "#privateManagementPanel"]) {
       const panel = $(selector);
       panel.inert = blocked;
@@ -526,6 +561,7 @@ window.createChatManagement = function (helpers) {
       policyForm.addEventListener("change", rememberDraft);
       $$(".toggle input", policyForm).forEach((input) => input.addEventListener("change", updatePolicyToggle));
     }
+    syncGroupPolicyPolling();
   }
 
   function groupPolicyMarkup(data) {
@@ -1069,8 +1105,6 @@ window.createChatManagement = function (helpers) {
     }
   }
 
-  window.setTimeout(pollSelectedGroupPolicy, 4000);
-
   return {
     clearPendingGroupMemberLoading,
     invalidateChatManagementContext,
@@ -1082,6 +1116,7 @@ window.createChatManagement = function (helpers) {
     renderGroupInspector,
     renderGroups,
     selectChatManagementTab,
+    syncGroupPolicyPolling,
     updateChatManagementAccount,
   };
 };

@@ -10,6 +10,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
+from typing import Callable
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
@@ -41,24 +42,101 @@ def _download(url: str) -> str:
 class PortraitCache:
     def __init__(self, root: str | Path):
         self.path = Path(root) / "data" / "portraits.db"
+        self._local = threading.local()
 
     @contextmanager
-    def _connect(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def _connect(self, *, write: bool = False):
+        if write:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.path, timeout=2)
         try:
-            with db:
-                db.execute("CREATE TABLE IF NOT EXISTS portraits (account TEXT, entity TEXT, profile TEXT, image TEXT, checked REAL, PRIMARY KEY(account, entity))")
-                yield db
+            if write:
+                with db:
+                    db.execute(
+                        "CREATE TABLE IF NOT EXISTS portraits "
+                        "(account TEXT, entity TEXT, profile TEXT, image TEXT, checked REAL, "
+                        "PRIMARY KEY(account, entity))"
+                    )
+            yield db
         finally:
             db.close()
 
+    def _batch_store(self) -> dict[tuple[str, str], tuple[int, dict[str, tuple[dict, str, float]]]]:
+        batches = getattr(self._local, "batches", None)
+        if batches is None:
+            batches = {}
+            self._local.batches = batches
+        return batches
+
+    @contextmanager
+    def batch(self, account: str):
+        """Preload one account's cached portraits in a single read connection."""
+        key = (str(self.path), account)
+        batches = self._batch_store()
+        existing = batches.get(key)
+        if existing is not None:
+            depth, entries = existing
+            batches[key] = (depth + 1, entries)
+        else:
+            batches[key] = (1, self.read_account(account))
+        try:
+            yield
+        finally:
+            current = batches.get(key)
+            if current is not None:
+                depth, entries = current
+                if depth <= 1:
+                    batches.pop(key, None)
+                else:
+                    batches[key] = (depth - 1, entries)
+
+    def read_account(self, account: str) -> dict[str, tuple[dict, str, float]]:
+        if not account or not self.path.is_file():
+            return {}
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    "SELECT entity, profile, image, checked FROM portraits WHERE account=?",
+                    (account,),
+                ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        entries: dict[str, tuple[dict, str, float]] = {}
+        for entity, raw_profile, image, checked in rows:
+            try:
+                entries[str(entity)] = (json.loads(raw_profile), image, checked)
+            except (ValueError, TypeError):
+                continue
+        return entries
+
     def read(self, account: str, entity: str) -> tuple[dict, str, float]:
-        with self._connect() as db:
-            row = db.execute("SELECT profile,image,checked FROM portraits WHERE account=? AND entity=?", (account, entity)).fetchone()
+        batches = getattr(self._local, "batches", None)
+        if batches is not None:
+            cached_batch = batches.get((str(self.path), account))
+            if cached_batch is not None:
+                return cached_batch[1].get(entity, ({}, "", 0))
+        if not self.path.is_file():
+            return {}, "", 0
+        try:
+            with self._connect() as db:
+                row = db.execute(
+                    "SELECT profile,image,checked FROM portraits WHERE account=? AND entity=?",
+                    (account, entity),
+                ).fetchone()
+        except sqlite3.OperationalError:
+            return {}, "", 0
         return (json.loads(row[0]), row[1], row[2]) if row else ({}, "", 0)
 
-    def enrich(self, account: str, item: dict, entity: str, fetch=None, *, force=False) -> dict:
+    def enrich(
+        self,
+        account: str,
+        item: dict,
+        entity: str,
+        fetch=None,
+        *,
+        force=False,
+        still_current: Callable[[], bool] | None = None,
+    ) -> dict:
         try:
             cached, image, checked = self.read(account, entity)
         except (OSError, sqlite3.Error, ValueError):
@@ -69,15 +147,30 @@ class PortraitCache:
         merged["avatar"] = image or cached.get("avatar") or item.get("avatar", "")
         changed = item.get("member_count") is not None and item.get("member_count") != cached.get("member_count")
         if force or changed or time.time() - checked >= 300:
+            if still_current is not None and not still_current():
+                return merged
             key = (str(self.path), account, entity)
+            should_submit = False
             with _LOCK:
                 if key not in _PENDING and len(_PENDING) < 128:
                     _PENDING.add(key)
-                    _POOL.submit(self._refresh, key, item, cached, image, fetch)
+                    should_submit = True
+            if should_submit:
+                try:
+                    if still_current is None:
+                        _POOL.submit(self._refresh, key, item, cached, image, fetch)
+                    else:
+                        _POOL.submit(self._refresh, key, item, cached, image, fetch, still_current)
+                except Exception:
+                    with _LOCK:
+                        _PENDING.discard(key)
+                    raise
         return merged
 
-    def _refresh(self, key, item, cached, image, fetch):
+    def _refresh(self, key, item, cached, image, fetch, still_current: Callable[[], bool] | None = None):
         try:
+            if still_current is not None and not still_current():
+                return
             profile = {**cached, **{k: v for k, v in item.items() if v not in (None, "")}}
             try:
                 fresh = fetch() if fetch else {}
@@ -87,9 +180,12 @@ class PortraitCache:
                     image = _download(source) or image
             except (OSError, ValueError):
                 _LOG.debug("Portrait refresh unavailable; retaining last successful image")
-            with self._connect() as db:
-                db.execute("INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?)", (key[1], key[2], json.dumps(profile, ensure_ascii=False), image, time.time()))
-                db.execute("DELETE FROM portraits WHERE rowid IN (SELECT rowid FROM portraits ORDER BY checked DESC LIMIT -1 OFFSET 256)")
+            if still_current is not None and not still_current():
+                return
+            with self._connect(write=True) as db:
+                with db:
+                    db.execute("INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?)", (key[1], key[2], json.dumps(profile, ensure_ascii=False), image, time.time()))
+                    db.execute("DELETE FROM portraits WHERE rowid IN (SELECT rowid FROM portraits ORDER BY checked DESC LIMIT -1 OFFSET 256)")
         except (OSError, sqlite3.Error, ValueError):
             _LOG.warning("Portrait cache could not be updated")
         finally:
