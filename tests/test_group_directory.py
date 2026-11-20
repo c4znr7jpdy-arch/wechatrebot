@@ -55,6 +55,55 @@ def test_directory_without_portraits_keeps_names_and_default_portrait_loading(tm
     assert enriched == ["test@chatroom"]
 
 
+@pytest.mark.parametrize("outcome", ["current", "wrong-account", "conflict"])
+def test_background_portrait_uses_account_verified_bridge_response(
+    tmp_path, monkeypatch, outcome
+):
+    obj, account, calls = service(tmp_path, monkeypatch)
+    monkeypatch.delattr(obj, "_request")
+    health_probe = directory.probe_bridge_health
+
+    def tracked_probe(**options):
+        calls.append("health")
+        return health_probe(**options)
+
+    def open_contact(request, *, timeout):
+        assert request.full_url.endswith("/api/manager/contacts/test%40chatroom")
+        assert request.get_header("X-wechatrebot-account") == "test-account"
+        calls.append("detail")
+        if outcome == "conflict":
+            account[0] = "other-account"
+            raise HTTPError(request.full_url, 409, "conflict", None, None)
+        return BytesIO(json.dumps({
+            "ok": True,
+            "data": {
+                "account_id": "other-account" if outcome == "wrong-account" else "test-account",
+                "items": [],
+                "item": {"avatar": "cached-avatar"},
+            },
+        }).encode("utf-8"))
+
+    monkeypatch.setattr(directory, "probe_bridge_health", tracked_probe)
+    monkeypatch.setattr(
+        directory, "build_opener", lambda *_handlers: SimpleNamespace(open=open_contact)
+    )
+    monkeypatch.setattr(obj._portraits, "enrich", lambda _account, item, _entity, fetch, **options: {
+        **item, **fetch()
+    })
+    with obj._lock:
+        port, token, identity = obj._connection()
+        generation = obj._account_generation
+    items = [{"group_id": "test@chatroom"}]
+
+    if outcome == "current":
+        result = obj._enrich_portraits(identity, generation, items, port=port, token=token)
+        assert result[0]["avatar"] == "cached-avatar"
+    else:
+        with pytest.raises(directory.GroupDirectoryError):
+            obj._enrich_portraits(identity, generation, items, port=port, token=token)
+    assert calls == (["health", "detail", "health"] if outcome == "conflict" else ["health", "detail"])
+
+
 def test_directory_without_portraits_preserves_fallback_and_account_checks(tmp_path, monkeypatch):
     obj, account, _ = service(tmp_path, monkeypatch)
     original = obj.list(include_portraits=False)

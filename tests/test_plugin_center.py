@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from html.parser import HTMLParser
 import json
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -1893,6 +1894,28 @@ def test_local_web_handler_serves_assets_and_rejects_foreign_mutation() -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_manager_static_allowlist_covers_index_scripts_and_stylesheets() -> None:
+    class PageDependencies(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.paths = set()
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            source = values.get("src") if tag == "script" else None
+            if tag == "link" and values.get("rel") == "stylesheet":
+                source = values.get("href")
+            if source and not source.startswith(("http:", "https:", "//")):
+                self.paths.add("/" + source.partition("?")[0].lstrip("/"))
+
+    assets = Path(plugin_center.__file__).with_name("app_webui")
+    page = PageDependencies()
+    page.feed((assets / "index.html").read_text("utf-8"))
+    registered = plugin_center_web._MANAGER_WEB_ASSETS | plugin_center_web._SHARED_STATIC_ASSETS.keys()
+    assert not (page.paths - registered)
+    assert all((assets / path.lstrip("/")).is_file() for path in page.paths)
 
 
 @pytest.mark.parametrize("frozen", [False, True])

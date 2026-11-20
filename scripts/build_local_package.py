@@ -69,16 +69,13 @@ def select_wheelhouse(root: Path) -> Path:
 
 
 def runtime_matches(root: Path, runtime: Path) -> bool:
-    from build_runtime import sha256_file
+    from build_runtime import CORE_ASTRBOT_PATCHES, sha256_file
     from build_staging import _validate_runtime_root
     try:
         manifest = json.loads((runtime / "runtime-manifest.json").read_text(encoding="utf-8"))
         inputs = {
             "requirements_sha256": "release/runtime-requirements.lock",
-            "astrbot_patch_sha256": "patches/astrbot-4.26.6-wechat.patch",
-            "astrbot_outbound_policy_patch_sha256": "patches/astrbot-4.26.6-outbound-policy.patch",
-            "astrbot_background_permissions_patch_sha256": "patches/astrbot-4.26.6-background-permissions.patch",
-            "astrbot_license_patch_sha256": "patches/astrbot-4.26.6-license.patch",
+            **{key: relative_path for key, (relative_path, _label) in CORE_ASTRBOT_PATCHES.items()},
         }
         if any(manifest.get(key) != sha256_file(root / path) for key, path in inputs.items()):
             return False

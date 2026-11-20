@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from wechatrebot_manager.payload import _is_user_config, sha256_file, validate_incremental_path
+from build_runtime import CORE_ASTRBOT_PATCHES
 from source_inputs import repository_sources, verify_source_inputs
 from wechatrebot_manager.licensing.bundle import RUNTIME_FILES, validate_runtime_bundle
 from wechatrebot_manager.licensing.config import _read_channel
@@ -31,10 +32,10 @@ BASE_INPUTS = {
     "release/runtime-wheelhouse.json": "legal/runtime-wheelhouse.json",
     "release/ffmpeg-runtime.json": "legal/ffmpeg-runtime.json",
     "release/hook-binaries.json": "legal/hook-binaries.json",
-    "patches/astrbot-4.26.6-wechat.patch": "legal/corresponding-source/astrbot-4.26.6-wechat.patch",
-    "patches/astrbot-4.26.6-outbound-policy.patch": "legal/corresponding-source/astrbot-4.26.6-outbound-policy.patch",
-    "patches/astrbot-4.26.6-background-permissions.patch": "legal/corresponding-source/astrbot-4.26.6-background-permissions.patch",
-    "patches/astrbot-4.26.6-license.patch": "legal/corresponding-source/astrbot-4.26.6-license.patch",
+    **{
+        relative_path: f"legal/corresponding-source/{Path(relative_path).name}"
+        for relative_path, _label in CORE_ASTRBOT_PATCHES.values()
+    },
     **{f"src/wechatrebot_manager/{name}": f"runtime/python/Lib/site-packages/wechatrebot_manager/{name}"
        for name in RUNTIME_FILES},
 }
@@ -108,7 +109,9 @@ def verify_manager_license_base(root: Path, install: Path) -> None:
     if not isinstance(runtime, dict):
         raise RuntimeError("授权运行时清单无效，本次需要完整载荷更新；未启动构建。")
     validate_runtime_bundle(root, site_packages, runtime.get("licensing_bundle_sha256"))
-    if runtime.get("astrbot_license_patch_sha256") != sha256_file(root / "patches/astrbot-4.26.6-license.patch"):
+    license_field = "astrbot_license_patch_sha256"
+    license_patch, _label = CORE_ASTRBOT_PATCHES[license_field]
+    if runtime.get(license_field) != sha256_file(root / license_patch):
         raise RuntimeError("授权核心补丁缺失或已变更，本次需要完整载荷更新；未启动构建。")
 
 

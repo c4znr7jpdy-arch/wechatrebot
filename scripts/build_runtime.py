@@ -21,6 +21,20 @@ PYTHON_ARCHIVE = f"python-{PYTHON_VERSION}-embed-amd64.zip"
 PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/{PYTHON_ARCHIVE}"
 PYTHON_SHA256 = "91D828C2DA3A029B41699E918674A0CB379C02CF20DAB9C501306885F837402A"
 FFMPEG_DEFINITION = "ffmpeg-runtime.json"
+CORE_ASTRBOT_PATCHES = {
+    "astrbot_patch_sha256": (
+        "patches/astrbot-4.26.6-wechat.patch", "WeChat patch",
+    ),
+    "astrbot_outbound_policy_patch_sha256": (
+        "patches/astrbot-4.26.6-outbound-policy.patch", "outbound policy patch",
+    ),
+    "astrbot_background_permissions_patch_sha256": (
+        "patches/astrbot-4.26.6-background-permissions.patch", "background permissions",
+    ),
+    "astrbot_license_patch_sha256": (
+        "patches/astrbot-4.26.6-license.patch", "authorization patch",
+    ),
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -335,14 +349,9 @@ def _install_wheels(
 
 
 def _apply_astrbot_patch(commercial_root: Path, site_packages: Path) -> None:
-    patches = (
-        commercial_root / "patches" / "astrbot-4.26.6-wechat.patch",
-        commercial_root / "patches" / "astrbot-4.26.6-outbound-policy.patch",
-        commercial_root / "patches" / "astrbot-4.26.6-background-permissions.patch",
-        commercial_root / "patches" / "astrbot-4.26.6-license.patch",
-    )
     site_relative = site_packages.relative_to(commercial_root).as_posix()
-    for patch in patches:
+    for relative_path, _label in CORE_ASTRBOT_PATCHES.values():
+        patch = commercial_root / relative_path
         if not patch.is_file():
             raise RuntimeError(f"AstrBot runtime patch is missing: {patch.name}")
         command = [
@@ -480,18 +489,10 @@ def main(argv: list[str] | None = None) -> int:
             "sha256": PYTHON_SHA256,
         },
         "requirements_sha256": sha256_file(requirements),
-        "astrbot_patch_sha256": sha256_file(
-            commercial_root / "patches" / "astrbot-4.26.6-wechat.patch"
-        ),
-        "astrbot_outbound_policy_patch_sha256": sha256_file(
-            commercial_root / "patches" / "astrbot-4.26.6-outbound-policy.patch"
-        ),
-        "astrbot_background_permissions_patch_sha256": sha256_file(
-            commercial_root / "patches" / "astrbot-4.26.6-background-permissions.patch"
-        ),
-        "astrbot_license_patch_sha256": sha256_file(
-            commercial_root / "patches" / "astrbot-4.26.6-license.patch"
-        ),
+        **{
+            key: sha256_file(commercial_root / relative_path)
+            for key, (relative_path, _label) in CORE_ASTRBOT_PATCHES.items()
+        },
         "licensing_bundle_sha256": licensing_fingerprint,
         "wheelhouse": {
             key: value

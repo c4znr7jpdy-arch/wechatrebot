@@ -204,6 +204,7 @@ class GroupDirectoryService:
                             token,
                             account,
                             f"/api/manager/contacts/{quote(str(group_id), safe='')}",
+                            verify_account=False,
                         ).get("item", {})
                     )
                     if port is not None
