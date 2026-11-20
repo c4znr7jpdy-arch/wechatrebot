@@ -17,8 +17,6 @@ window.createModelServices = function (helpers) {
   } = helpers;
 
   let providerGridMotion;
-  let providerTestGeneration = 0;
-  let providerTestBusy = false;
   let providerModelDiscoveryGeneration = 0;
   let resetProviderModelDiscovery = null;
   let providerEditorGeneration = 0;
@@ -28,11 +26,10 @@ window.createModelServices = function (helpers) {
   let providerMutationBusy = false;
   let providerReadbackResult = "模型已保存";
 
-  function clearProviderTest() {
-    providerTestGeneration += 1;
-    $("#providerTestResult").hidden = true;
-    $("#providerTestOutput").textContent = "";
-  }
+  const providerTests = window.createModelServiceTests({
+    $, $$, api, escapeHtml, reportError, state, toast, updateProviderDirty, visibleProviderServices,
+  });
+  const {clearProviderTest, testSelectedProvider} = providerTests;
 
   const providerIconFiles = {
     deepseek: "deepseek.ico",
@@ -132,7 +129,9 @@ window.createModelServices = function (helpers) {
     const updated = services
       .filter((item) => item.id !== data.id)
       .map((item) => data.is_default ? {...item, is_default: false} : item);
-    updated.push({...existing, ...data});
+    updated.push({...existing, ...data, last_test: data.last_test ?? null});
+    providerTests.invalidate(submitted.provider_id);
+    providerTests.invalidate(data.id);
     applyProviderServices(updated);
     if (generation !== providerEditorGeneration || state.providerScreen !== "editor") return;
     const form = $("#providerForm");
@@ -300,9 +299,7 @@ window.createModelServices = function (helpers) {
 
   function providerCardIdentity(service) {
     const preset = providerPresetFor(service);
-    const definition = (state.bootstrap?.provider_presets || []).find((item) => item.id === preset);
-    const label = providerIconFiles[preset] ? definition?.name : "兼容服务";
-    return {mark: providerIconMarkup(preset), label, className: "provider-brand-logo"};
+    return {mark: providerIconMarkup(preset), className: "provider-brand-logo"};
   }
 
   function providerChatModalityValue(modalities) {
@@ -473,45 +470,33 @@ window.createModelServices = function (helpers) {
     providerGridMotion ??= window.managerMotion?.trackGrid(list);
     const before = providerGridMotion?.capture();
     const items = visibleProviderServices();
-    const displayItems = [...items].sort((left, right) => Number(right.is_default) - Number(left.is_default));
+    const displayItems = [...items].sort((left, right) => Number(Boolean(right.is_default || right.is_default_embedding)) - Number(Boolean(left.is_default || left.is_default_embedding)));
     const status = $("#providerStatus");
     const defaultProvider = items.find((item) => item.is_default);
     status.className = `status-badge ${defaultProvider ? "success" : "checking"}`;
     status.textContent = `${items.length} 项服务`;
     list.innerHTML = items.length ? `
-      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.name} 正在回复` : "请选择回复模型")}</strong><span>机器人和相关功能共用这些配置，API Key / Token Plan 仅保存在当前设备。</span></div></div>
+      <div class="provider-list-toolbar"><div><strong>${escapeHtml(defaultProvider ? `${defaultProvider.model || defaultProvider.name} 正在回复` : "请选择回复模型")}</strong></div><div class="provider-batch-actions"><button class="button secondary small" type="button" data-action-bound disabled data-provider-test-all>测试所有模型</button><span class="provider-batch-status" role="status"></span></div></div>
       <div class="provider-service-cards">${displayItems.map((item) => {
         const identity = providerCardIdentity(item);
-        const functionalService = item.service_kind !== "chat";
-        const statusText = item.is_default
-          ? "使用中"
-          : !item.configured
-            ? "待完善"
-            : functionalService ? "功能可选" : "备用";
-        const description = item.is_default
-          ? "当前回复模型"
-          : !item.configured
-            ? "补充 API Key / Token Plan 后即可使用"
-            : functionalService ? "供对应功能选择" : "可切换为回复模型";
-        const capability = item.service_kind === "image"
-          ? {title: "图片能力", detail: "供功能中心图片生成选择"}
-          : item.service_kind === "voice"
-            ? {title: "语音能力", detail: "供语音功能选择"}
-            : {title: "向量能力", detail: "供长期记忆等检索功能选择"};
+        const active = item.is_default || item.is_default_embedding;
+        const statusText = active ? (item.is_default_embedding ? "默认向量" : "使用中")
+          : !item.configured ? "待完善" : "备用";
+        const kind = item.service_kind || "chat";
+        const switchAction = !active && ["chat", "embedding"].includes(kind)
+          ? `<button class="provider-card-action primary" type="button" data-action-bound disabled data-provider-${kind === "embedding" ? "embedding-default" : "default"}="${escapeHtml(item.id)}">${kind === "embedding" ? "设为默认" : "切换使用"}</button>` : "";
         return `
-        <article class="provider-service ${item.is_default ? "active" : ""}" data-motion-key="provider:${escapeHtml(item.id)}">
+        <article class="provider-service ${active ? "active" : ""}" data-provider-card="${escapeHtml(item.id)}" data-motion-key="provider:${escapeHtml(item.id)}">
           <header class="provider-card-header">
             <div class="provider-card-title">
               <span class="provider-logo ${identity.className}" aria-hidden="true">${identity.mark}</span>
-              <div class="provider-service-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(identity.label)}</span></div>
+              <div class="provider-service-copy"><strong>${escapeHtml(item.model || item.name)}</strong></div>
             </div>
             <div class="provider-card-status-row">
-              <span class="provider-card-status ${item.is_default ? "active" : item.configured ? "ready" : "incomplete"}">${statusText}</span>
               <details class="provider-card-menu">
                 <summary aria-label="打开 ${escapeHtml(item.name)} 操作菜单" title="更多操作">${icon("i-more")}</summary>
                 <div class="provider-card-menu-popover" role="menu">
                   <button type="button" role="menuitem" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑服务</button>
-                  ${item.is_default || item.service_kind !== "chat" ? "" : `<button type="button" role="menuitem" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">设为回复模型</button>`}
                   <button class="danger" type="button" role="menuitem" data-action-bound disabled data-provider-delete="${escapeHtml(item.id)}">删除服务</button>
                 </div>
               </details>
@@ -519,19 +504,21 @@ window.createModelServices = function (helpers) {
           </header>
           <div class="provider-service-body">
             <div class="provider-card-tags">
-              <span>${escapeHtml(item.modality_label || providerCapabilityLabel(item.service_kind))}</span>
-              <span>${item.configured ? "已配置" : "缺少 API Key / Token Plan"}</span>
+              <span class="provider-kind-tag" data-provider-kind="${escapeHtml(kind)}">${escapeHtml(providerCapabilityLabel(kind))}</span>
+              <span class="provider-card-status ${active ? "active" : item.configured ? "ready" : "incomplete"}">${statusText}</span>
+              ${item.configured ? "" : '<span>缺少 API Key / Token Plan</span>'}
             </div>
-            <p>${escapeHtml(description)}</p>
             ${item.service_kind === "chat" ? `<div class="provider-thinking-control">
               <span><strong>思考模式</strong></span>
               <button class="provider-thinking-switch" type="button" role="switch" aria-label="${escapeHtml(item.name)}思考模式" aria-checked="${Boolean(item.thinking_enabled)}" data-action-bound disabled data-provider-thinking="${escapeHtml(item.id)}"><span aria-hidden="true"></span></button>
-            </div>` : `<div class="provider-thinking-control"><span><strong>${capability.title}</strong><small>${capability.detail}</small></span></div>`}
+            </div>` : ""}
           </div>
           <footer class="provider-service-actions">
             <button class="provider-card-action" type="button" data-action-bound disabled data-provider-edit="${escapeHtml(item.id)}">编辑</button>
-            ${item.is_default ? '<span class="provider-card-current">正在用于回复</span>' : item.service_kind === "chat" ? `<button class="provider-card-action primary" type="button" data-action-bound disabled data-provider-default="${escapeHtml(item.id)}">切换使用</button>` : `<span class="provider-card-current">供相关功能选择</span>`}
+            <button class="provider-card-action" type="button" data-action-bound disabled data-provider-test="${escapeHtml(item.id)}">测试</button>
+            ${switchAction}
             <button class="provider-card-action danger" type="button" data-action-bound disabled data-provider-delete="${escapeHtml(item.id)}">删除</button>
+            ${providerTests.cardMarkup(item)}
           </footer>
         </article>`;
       }).join("")}
@@ -550,6 +537,7 @@ window.createModelServices = function (helpers) {
 
       </div>`;
     $$('[data-action-bound]', $("#providerServiceList")).forEach((button) => { button.disabled = false; });
+    providerTests.refresh();
     providerGridMotion?.refresh(before);
     renderHomeSetupAlerts();
   }
@@ -569,62 +557,21 @@ window.createModelServices = function (helpers) {
     finally { button.disabled = false; button.textContent = original; finishProviderMutation(); }
   }
 
-  async function testSelectedProvider() {
-    const form = $("#providerForm");
-    const providerId = form.elements.provider_id.value;
-    if (!providerId || providerTestBusy) return;
-    updateProviderDirty();
-    if (state.providerDirty) {
-      $("#providerNote").textContent = "请先保存修改，再测试当前模型。";
-      return;
-    }
-    const button = $("#testProvider");
-    const generation = ++providerTestGeneration;
-    const model = form.elements.model.value;
-    const current = () => generation === providerTestGeneration && state.activePage === "settings" && state.settingsSection === "model"
-      && state.providerScreen === "editor" && form.elements.provider_id.value === providerId;
-    const result = $("#providerTestResult");
-    const title = $("#providerTestTitle");
-    const meta = $("#providerTestMeta");
-    const output = $("#providerTestOutput");
-    const started = performance.now();
-    providerTestBusy = true;
+  async function setDefaultEmbeddingProvider(providerId, button) {
+    if (button.disabled || providerMutationBusy) return;
+    const original = button.textContent;
+    beginProviderMutation();
     button.disabled = true;
-    button.textContent = "测试中…";
-    $("#providerNote").textContent = "";
-    result.hidden = false;
-    result.dataset.status = "pending";
-    title.textContent = "正在请求模型…";
-    output.textContent = "";
-    const updateElapsed = () => {
-      if (current()) meta.textContent = `${model} · 已等待 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
-    };
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 500);
+    button.textContent = "切换中…";
     try {
-      const data = await api("test_provider", providerId);
-      if (!current()) return;
-      if (data?.status !== "available" || data.id !== providerId
-          || (data.test_kind === "chat" && !data.response_text?.trim())) {
-        throw new Error("未收到有效的模型测试结果，请更新后重试。");
-      }
-      result.dataset.status = "success";
-      title.textContent = "本次模型测试成功";
-      meta.textContent = `${data.model || model} · ${(data.elapsed_ms / 1000).toFixed(1)} 秒`;
-      output.textContent = data.response_text || "已完成该模型用途的实际请求。";
-    } catch (error) {
-      if (!current()) return;
-      result.dataset.status = "error";
-      title.textContent = error.product?.title || "模型测试失败";
-      meta.textContent = `${model} · ${((performance.now() - started) / 1000).toFixed(1)} 秒${error.product?.code ? ` · ${error.product.code}` : ""}`;
-      output.textContent = error.product?.detail || error.message;
-      reportError(error);
-    } finally {
-      window.clearInterval(timer);
-      providerTestBusy = false;
-      button.disabled = false;
-      button.textContent = "测试模型";
-    }
+      const result = await api("set_default_embedding_provider", providerId);
+      applyProviderServices(state.bootstrap.providers.map((item) => ({...item, is_default_embedding: item.id === result.id})));
+      toast({applied: "默认向量模型已切换。", pending_enable: "默认向量模型已保存，启用长期记忆后使用。",
+        pending_setup: "默认向量模型已保存，长期记忆准备就绪后使用。"}[result.apply_state]
+        || "默认向量模型已保存，将在启动时生效。");
+      await refreshProviderServices("默认向量模型已切换");
+    } catch (error) { reportError(error); }
+    finally { button.disabled = false; button.textContent = original; finishProviderMutation(); }
   }
 
   async function discoverProviderModels() {
@@ -794,12 +741,12 @@ window.createModelServices = function (helpers) {
     const replacementKind = service.is_default ? "chat" : (service.service_kind || "chat");
     const alternatives = (state.bootstrap?.providers || []).filter((item) => item.id !== providerId && item.configured && (item.service_kind || "chat") === replacementKind);
     const references = Array.isArray(service.references) ? service.references : [];
-    const needsReplacement = service.is_default || references.length > 0;
+    const needsReplacement = service.is_default || service.is_default_embedding || references.length > 0;
     if (needsReplacement && !alternatives.length) {
       toast("当前模型仍在被机器人或功能使用。请先添加另一个可用模型，再删除它。", "error");
       return;
     }
-    const replacementUsers = [...new Set([...(service.is_default ? ["机器人回复"] : []), ...references])].join("、");
+    const replacementUsers = [...new Set([...(service.is_default ? ["机器人回复"] : []), ...(service.is_default_embedding ? ["长期记忆"] : []), ...references])].join("、");
     confirmAction({
       title: "删除模型服务？",
       subject: {label: "将删除的模型", value: service.name},
@@ -818,11 +765,13 @@ window.createModelServices = function (helpers) {
         beginProviderMutation();
         try {
           await api("delete_provider", providerId, replacementId || "");
+          providerTests.invalidate(providerId);
           applyProviderServices(state.bootstrap.providers
             .filter((item) => item.id !== providerId)
             .map((item) => item.id === replacementId ? {
               ...item,
               is_default: service.is_default || item.is_default,
+              is_default_embedding: service.is_default_embedding || item.is_default_embedding,
               references: [...new Set([...(item.references || []), ...references])],
             } : item));
           markProviderClean();
@@ -842,6 +791,7 @@ window.createModelServices = function (helpers) {
     button.setAttribute("aria-busy", "true");
     try {
       const result = await api("set_provider_thinking", providerId, !service.thinking_enabled);
+      providerTests.invalidate(providerId);
       applyProviderServices(state.bootstrap.providers.map((item) => item.id === result.id ? {
         ...item, thinking_enabled: result.thinking_enabled,
         thinking_supported: result.thinking_supported ?? item.thinking_supported,
@@ -868,7 +818,7 @@ window.createModelServices = function (helpers) {
     discoverProviderModels,
     editProvider,
     guardProviderDraft,
-    isProviderSaving: () => providerSaveBusy || providerMutationBusy || providerReadBusy,
+    isProviderSaving: () => providerSaveBusy || providerMutationBusy || providerReadBusy || providerTests.isBusy(),
     inferProviderModalities,
     providerCapabilityLabel,
     providerThinkingSupported,
@@ -882,6 +832,9 @@ window.createModelServices = function (helpers) {
     syncProviderServiceKind,
     syncProviderThinkingControl,
     testSelectedProvider,
+    testProviderCard: providerTests.testProviderCard,
+    testAllProviders: providerTests.testAllProviders,
+    setDefaultEmbeddingProvider,
     updateProviderDirty,
   };
 };

@@ -918,6 +918,10 @@ def test_model_test_explains_how_to_start_robot_and_recovers_after_start(
     monkeypatch, tmp_path: Path,
 ) -> None:
     api = _api(tmp_path)
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (
+        ProviderService("test/chat", "test", "Chat", "https://example.test/v1", "chat",
+                        "synthetic-key", True, False),
+    ))
     online = False
     calls = []
     probe_calls = []
@@ -954,7 +958,8 @@ def test_model_test_explains_how_to_start_robot_and_recovers_after_start(
     started = api.test_provider("test/chat")
 
     assert started["ok"] is True
-    assert started["data"] == expected
+    assert {key: started["data"][key] for key in expected} == expected
+    assert started["data"]["last_test"]["status"] == "success"
     assert calls == ["test/chat"]
     assert probe_calls == [False, True]
 
@@ -963,6 +968,10 @@ def test_model_test_preserves_provider_failure_codes_and_hides_unexpected_errors
     monkeypatch, tmp_path: Path,
 ) -> None:
     api = _api(tmp_path)
+    monkeypatch.setattr(model_api, "load_provider_services", lambda _root: (
+        ProviderService("test/chat", "test", "Chat", "https://example.test/v1", "chat",
+                        "synthetic-key", True, False),
+    ))
 
     def denied(_provider_id):
         raise model_api.ProviderTestError("API Key 未通过验证，请检查密钥。", code="16002")

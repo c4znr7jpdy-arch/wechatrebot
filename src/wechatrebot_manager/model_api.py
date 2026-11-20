@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from typing import Any
 
 from .customer_config import (
@@ -23,6 +25,10 @@ from .customer_config import (
     web_search_settings_from_config,
 )
 from .json_io import write_json_atomic
+from .embedding_default import (
+    EMBEDDING_MODULE, embedding_config_path,
+    save_embedding_default, with_embedding_default,
+)
 from .plugin_center import EngineApiClient, EngineUnavailableError, PluginCenterError
 from .plugin_errors import ProviderTestError
 from .provider import (
@@ -36,6 +42,13 @@ from .provider import (
     supports_thinking_toggle,
 )
 from .runtime_config import bind_missing_analysis_model
+from .provider_test_results import (
+    ProviderTestAttempt,
+    ProviderTestHistoryError,
+    begin_provider_test,
+    finish_provider_test,
+    load_provider_test_results,
+)
 
 
 class AnalysisModelBindingError(PluginCenterError):
@@ -83,6 +96,11 @@ class ModelApiMixin:
             make_default = service_kind == "chat" and (
                 not chat_services or bool(selected is not None and selected.is_default)
             )
+            editing_embedding = selected is not None and getattr(selected, "service_kind", "chat") == "embedding"
+            if editing_embedding and service_kind != "embedding" and (
+                getattr(selected, "is_default_embedding", False) or selected.reference_modules
+            ):
+                raise ValueError("此向量模型仍在使用中，请先切换默认向量模型及相关功能，再更改用途。")
             current = load_provider_profile(self._install_root)
             api_key = _provider_api_key(values, selected)
             api_base = normalize_api_base(str(values.get("api_base") or ""))
@@ -121,6 +139,7 @@ class ModelApiMixin:
                     original_provider_id=(
                         original_id
                         if selected is not None and selected.model == model
+                        and not (editing_embedding and original_id != profile.normalized().model_id)
                         else None
                     ),
                     make_default=make_default,
@@ -136,6 +155,13 @@ class ModelApiMixin:
                     profile,
                     make_default=make_default,
                 )
+            if editing_embedding and service_kind == "embedding" and original_id != saved.model_id:
+                migrated = self.delete_provider(original_id, saved.model_id)
+                if not migrated.get("ok"):
+                    raise PluginCenterError(
+                        "新向量模型已保存，但旧模型绑定迁移未完成；旧模型已保留。"
+                        "请重新读取列表并核对默认向量模型。"
+                    )
             if saved.service_kind == "chat":
                 self._bind_group_analysis_model(
                     saved if make_default else current,
@@ -159,6 +185,10 @@ class ModelApiMixin:
                     "model": saved.model,
                     "api_key_configured": bool(saved.api_key),
                     "is_default": make_default,
+                    "is_default_embedding": any(
+                        item.provider_id == saved.model_id and item.is_default_embedding
+                        for item in load_provider_services(self._install_root)
+                    ),
                     "is_recommended": (
                         saved.source_id == DEFAULT_PROVIDER_SOURCE_ID
                         and saved.model == DEFAULT_PROVIDER_MODEL
@@ -231,14 +261,14 @@ class ModelApiMixin:
             return value.casefold() == "true"
         raise ValueError("思考模式只能选择开启或关闭。")
 
+    def _public_provider_services(self, services: tuple[ProviderService, ...]) -> list[dict[str, object]]:
+        results = load_provider_test_results(self._install_root, services)
+        return [{**item.to_public_dict(), "last_test": results.get(item.provider_id)}
+                for item in services]
+
     def get_providers(self) -> dict[str, object]:
         try:
-            return self._ok(
-                [
-                    item.to_public_dict()
-                    for item in load_provider_services(self._install_root)
-                ]
-            )
+            return self._ok(self._public_provider_services(load_provider_services(self._install_root)))
         except (OSError, ValueError) as exc:
             return self._failed(exc, "15001")
 
@@ -352,6 +382,21 @@ class ModelApiMixin:
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
+    def set_default_embedding_provider(self, provider_id: str) -> dict[str, object]:
+        try:
+            selected = next((item for item in load_provider_services(self._install_root)
+                             if item.provider_id == provider_id), None)
+            if selected is None or not selected.configured or selected.service_kind != "embedding":
+                raise ValueError("请选择一个已配置的向量模型。")
+            client = EngineApiClient(self._install_root)
+            apply_state = save_embedding_default(
+                self._install_root, provider_id, client, client.is_available(),
+            )
+            return self._ok({"id": provider_id, "apply_state": apply_state},
+                            message="默认向量模型已保存，其余向量模型将自动兜底。")
+        except (OSError, ValueError, PluginCenterError) as exc:
+            return self._failed(exc, "15001")
+
     def set_provider_thinking(self, provider_id: str, enabled: bool) -> dict[str, object]:
         try:
             requested = self._requested_thinking(enabled)
@@ -398,21 +443,58 @@ class ModelApiMixin:
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
 
-    def test_provider(self, provider_id: str) -> dict[str, object]:
+    def _record_provider_test(
+        self, attempt: ProviderTestAttempt | None, *, status: str,
+        elapsed_ms: float, error_code: str = "",
+    ) -> dict[str, object]:
+        if attempt is None:
+            return {"last_test": None}
         try:
+            result = finish_provider_test(
+                self._install_root, attempt, load_provider_services(self._install_root),
+                status=status, elapsed_ms=elapsed_ms, error_code=error_code,
+            )
+            return {"last_test": result}
+        except (OSError, ValueError) as exc:
+            # An actual model result must not become a model failure merely
+            # because optional history could not be written to disk.
+            finish_provider_test(self._install_root, attempt, (), status=status,
+                                 elapsed_ms=elapsed_ms, error_code=error_code)
+            logging.getLogger(__name__).warning("Model test completed but its history could not be saved.")
+            return {
+                "last_test": exc.result if isinstance(exc, ProviderTestHistoryError) else None,
+                "history_warning": "本次测试已完成，但测试记录未能保存。",
+            }
+
+    def test_provider(self, provider_id: str) -> dict[str, object]:
+        attempt = None
+        started = time.perf_counter()
+        try:
+            selected = next((item for item in load_provider_services(self._install_root)
+                             if item.provider_id == provider_id), None)
+            if selected is None:
+                raise ProviderTestError("所选模型服务不存在，请刷新后重试。", code="16001")
+            attempt = begin_provider_test(self._install_root, selected)
             client = EngineApiClient(self._install_root)
             if not client.is_available():
                 raise ProviderTestError(
                     "回复引擎尚未就绪。请先到运行中心启动机器人，待服务就绪后再返回测试模型。",
                     code="13002",
                 )
-            return self._ok(client.test_provider(provider_id))
+            data = client.test_provider(provider_id)
+            return self._ok({**data, **self._record_provider_test(
+                attempt, status="success", elapsed_ms=data["elapsed_ms"],
+            )})
         except ProviderTestError as exc:
             result = self._failed(exc, exc.error_code)
             result["error"].update(message=str(exc), detail=str(exc))
-            return result
         except (OSError, ValueError, PluginCenterError) as exc:
-            return self._failed(exc, "15001")
+            result = self._failed(exc, "15001")
+        result["error"].update(self._record_provider_test(
+            attempt, status="error", elapsed_ms=(time.perf_counter() - started) * 1000,
+            error_code=result["error"]["code"],
+        ))
+        return result
 
     def discover_provider_models(self, values: dict[str, Any]) -> dict[str, object]:
         try:
@@ -456,7 +538,10 @@ class ModelApiMixin:
             reference_modules = provider_reference_modules(
                 self._install_root, provider_id, strict=True
             )
-            needs_replacement = selected.is_default or bool(reference_modules)
+            embedding_default = bool(getattr(selected, "is_default_embedding", False))
+            if embedding_default and EMBEDDING_MODULE not in reference_modules:
+                reference_modules = (*reference_modules, EMBEDDING_MODULE)
+            needs_replacement = selected.is_default or embedding_default or bool(reference_modules)
             if needs_replacement:
                 replacement = next(
                     (
@@ -480,6 +565,9 @@ class ModelApiMixin:
                     updated, count = replace_provider_value(
                         snapshot["config"], provider_id, replacement_provider_id
                     )
+                    if embedding_default and module_name == EMBEDDING_MODULE:
+                        updated = with_embedding_default(updated, replacement_provider_id)
+                        count += 1
                     if count:
                         snapshots[module_name] = snapshot
                         prepared[module_name] = updated
@@ -495,7 +583,11 @@ class ModelApiMixin:
                         applied.append(
                             (module_name, str(receipt.get("revision") or ""))
                         )
+                    if selected.is_default:
+                        client.set_default_provider(replacement_provider_id)
+                    client.delete_provider(provider_id, selected.source_id)
                 except PluginCenterError:
+                    rollback_errors = []
                     for module_name, revision in reversed(applied):
                         try:
                             client.save_config(
@@ -503,26 +595,30 @@ class ModelApiMixin:
                                 snapshots[module_name]["config"],
                                 base_revision=revision or None,
                             )
-                        except PluginCenterError:
-                            pass
+                        except PluginCenterError as rollback_error:
+                            rollback_errors.append(rollback_error)
+                    if rollback_errors:
+                        raise PluginCenterError("模型删除未完成，相关功能绑定未能完整恢复，请重新读取模型列表并核对配置。") from rollback_errors[0]
                     raise
-                if selected.is_default:
-                    client.set_default_provider(replacement_provider_id)
-                client.delete_provider(provider_id, selected.source_id)
                 delete_provider_thinking_preference(
                     self._install_root, provider_id
                 )
                 hot_applied = True
             else:
-                if reference_modules:
-                    replace_provider_references(
-                        self._install_root,
-                        provider_id,
-                        replacement_provider_id,
+                if embedding_default:
+                    self._delete_default_embedding_offline(
+                        provider_id, replacement_provider_id, reference_modules,
                     )
-                if selected.is_default:
-                    set_default_provider(self._install_root, replacement_provider_id)
-                delete_provider_profile(self._install_root, provider_id)
+                else:
+                    if reference_modules:
+                        replace_provider_references(
+                            self._install_root,
+                            provider_id,
+                            replacement_provider_id,
+                        )
+                    if selected.is_default:
+                        set_default_provider(self._install_root, replacement_provider_id)
+                    delete_provider_profile(self._install_root, provider_id)
                 hot_applied = False
             if hot_applied and reference_modules:
                 message = "模型服务已删除，相关功能已切换并立即生效。"
@@ -541,3 +637,34 @@ class ModelApiMixin:
             )
         except (OSError, ValueError, PluginCenterError) as exc:
             return self._failed(exc, "15001")
+
+    def _delete_default_embedding_offline(
+        self, provider_id: str, replacement_id: str, modules: tuple[str, ...],
+    ) -> None:
+        config_root = embedding_config_path(self._install_root).parent
+        pending = []
+        for module in modules:
+            path = config_root / f"{module}_config.json"
+            original = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
+            updated, _ = replace_provider_value(original, provider_id, replacement_id)
+            if module == EMBEDDING_MODULE:
+                updated = with_embedding_default(updated, replacement_id)
+            pending.append((path, original, updated))
+        written = []
+        try:
+            for path, original, updated in pending:
+                write_json_atomic(path, updated)
+                written.append((path, original, updated))
+            delete_provider_profile(self._install_root, provider_id)
+        except (OSError, ValueError):
+            rollback_errors = []
+            for path, original, updated in reversed(written):
+                try:
+                    if json.loads(path.read_text(encoding="utf-8-sig")) != updated:
+                        raise ValueError("模型绑定已被其他操作修改。")
+                    write_json_atomic(path, original)
+                except (OSError, ValueError) as error:
+                    rollback_errors.append(error)
+            if rollback_errors:
+                raise PluginCenterError("模型删除未完成，相关功能绑定未能完整恢复，请重新读取后核对配置。") from rollback_errors[0]
+            raise

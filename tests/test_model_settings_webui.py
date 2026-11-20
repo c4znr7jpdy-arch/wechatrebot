@@ -601,7 +601,7 @@ def test_provider_icons_default_save_and_editor_navigation(browser, manager_url,
         expect(page.locator("#saveProvider")).to_be_enabled()
         expect(page.locator("#providerEditorPage")).to_be_visible()
         page.locator("#closeProviderEditor").click()
-        relay = page.locator(".provider-service").filter(has_text="其他兼容服务")
+        relay = page.locator('.provider-service[data-provider-card="custom/deepseek-flash"]')
         expect(relay.locator(".provider-logo svg")).to_be_visible()
         expect(relay.locator(".provider-logo img")).to_have_count(0)
         relay.locator(".provider-service-actions [data-provider-edit]").click()

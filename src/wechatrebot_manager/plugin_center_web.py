@@ -326,6 +326,7 @@ def _handler(
                     "/tab-motion.js",
                     "/scheduled-tasks.js",
                     "/model-services.js",
+                    "/model-service-tests.js",
                     "/chat-management.js",
                     "/chat-profiles.js",
                     "/contact-profile.js",

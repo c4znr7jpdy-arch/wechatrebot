@@ -552,7 +552,7 @@ class IndexValidatorRebuildMixin:
         active_document_ids = await self._get_document_ids()
 
         temp_index = None
-        if temp_path and metadata_path and os.path.exists(temp_path):
+        if options.get("resume_checkpoint", True) and temp_path and metadata_path and os.path.exists(temp_path):
             try:
                 with open(metadata_path, encoding="utf-8") as metadata_file:
                     checkpoint_metadata = json.load(metadata_file)

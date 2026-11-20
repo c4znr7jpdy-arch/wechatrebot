@@ -34,3 +34,191 @@
 .provider-preset-icon svg,
 .provider-brand-logo svg { width: 22px; height: 22px; }
 #page-settings .provider-logo.provider-brand-logo { color: var(--muted); background: var(--surface-muted); }
+
+/* Semantic model types stay distinct even when a skin changes the brand accent. */
+#providerServiceList {
+  --provider-chat-ink: #2458a6;
+  --provider-chat-surface: #e8f0ff;
+  --provider-embedding-ink: #6c429b;
+  --provider-embedding-surface: #f2eafd;
+  --provider-image-ink: #8a5213;
+  --provider-image-surface: #fff0d9;
+  --provider-voice-ink: #126e67;
+  --provider-voice-surface: #def3ee;
+}
+
+html[data-theme="dark"] #providerServiceList {
+  --provider-chat-ink: #b2d0ff;
+  --provider-chat-surface: #203452;
+  --provider-embedding-ink: #d4b8ff;
+  --provider-embedding-surface: #342344;
+  --provider-image-ink: #f3c584;
+  --provider-image-surface: #43301b;
+  --provider-voice-ink: #90dfd1;
+  --provider-voice-surface: #173b37;
+}
+
+/* Both IDs keep shared behavior above the dynamically loaded skin rules. */
+#page-settings #providerServiceList .provider-service,
+#page-settings #providerServiceList .provider-add-card {
+  min-height: 210px;
+}
+
+#page-settings #providerServiceList .provider-card-header {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+#page-settings #providerServiceList .provider-card-title {
+  flex: 1 1 auto;
+  align-items: flex-start;
+}
+
+#page-settings #providerServiceList .provider-service-copy strong {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  line-height: 1.45;
+}
+
+#page-settings #providerServiceList .provider-card-status-row {
+  align-items: flex-start;
+  gap: 4px;
+  margin-left: auto;
+}
+
+#page-settings #providerServiceList .provider-card-status {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+#page-settings #providerServiceList .provider-card-status.active {
+  color: var(--green-700);
+  background: var(--green-100);
+  border-color: var(--green-line, var(--green-100));
+}
+
+#page-settings #providerServiceList .provider-card-status.ready {
+  color: var(--muted);
+  background: var(--surface-muted);
+  border-color: var(--line);
+}
+
+#page-settings #providerServiceList .provider-card-status.incomplete {
+  color: var(--amber-700);
+  background: var(--amber-100);
+  border-color: var(--amber-line, var(--amber-100));
+}
+
+#page-settings #providerServiceList .provider-kind-tag[data-provider-kind="chat"] {
+  color: var(--provider-chat-ink);
+  background: var(--provider-chat-surface);
+  border-color: var(--provider-chat-surface);
+}
+
+#page-settings #providerServiceList .provider-kind-tag[data-provider-kind="embedding"] {
+  color: var(--provider-embedding-ink);
+  background: var(--provider-embedding-surface);
+  border-color: var(--provider-embedding-surface);
+}
+
+#page-settings #providerServiceList .provider-kind-tag[data-provider-kind="image"] {
+  color: var(--provider-image-ink);
+  background: var(--provider-image-surface);
+  border-color: var(--provider-image-surface);
+}
+
+#page-settings #providerServiceList .provider-kind-tag[data-provider-kind="voice"] {
+  color: var(--provider-voice-ink);
+  background: var(--provider-voice-surface);
+  border-color: var(--provider-voice-surface);
+}
+
+#page-settings #providerServiceList .provider-thinking-control {
+  min-height: 30px;
+  border-top: 0;
+  padding-top: 0;
+}
+
+#page-settings #providerServiceList .provider-thinking-switch {
+  flex-basis: 34px;
+  width: 34px;
+  height: 20px;
+}
+
+#page-settings #providerServiceList .provider-thinking-switch > span {
+  width: 14px;
+  height: 14px;
+}
+
+#page-settings #providerServiceList .provider-thinking-switch[aria-checked="true"] > span {
+  transform: translateX(14px);
+}
+
+#page-settings #providerServiceList .provider-card-test {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 2px 0 2px 4px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#page-settings #providerServiceList .provider-test-label {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#page-settings #providerServiceList .provider-card-test[data-status="success"] {
+  color: var(--green-700);
+}
+
+#page-settings #providerServiceList .provider-card-test[data-status="error"] {
+  color: var(--red-700);
+}
+
+#page-settings #providerServiceList .provider-card-test[data-status="pending"] {
+  color: var(--amber-700);
+}
+
+#page-settings #providerServiceList .provider-service-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  row-gap: 6px;
+}
+
+#page-settings #providerServiceList .provider-card-action {
+  min-height: 32px;
+}
+
+#page-settings #providerServiceList .provider-card-action:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+#page-settings #providerServiceList .provider-list-toolbar {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+#page-settings #providerServiceList .provider-list-toolbar > div:first-child {
+  min-width: 0;
+  flex: 1 1 240px;
+  overflow-wrap: anywhere;
+}
+
+#page-settings #providerServiceList .provider-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#page-settings #providerServiceList .provider-batch-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}

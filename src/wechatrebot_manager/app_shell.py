@@ -163,6 +163,7 @@ PUBLIC_API_METHODS = (
     "save_web_search_settings",
     "save_provider",
     "set_default_provider",
+    "set_default_embedding_provider",
     "set_provider_thinking",
     "test_provider",
     "discover_provider_models",
@@ -521,7 +522,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
                         ),
                         "api_key_configured": bool(provider and provider.api_key),
                     },
-                    "providers": [item.to_public_dict() for item in providers],
+                    "providers": self._public_provider_services(providers),
                     "experience": experience,
                     "readiness": readiness,
                     "startup_timing_ms": {

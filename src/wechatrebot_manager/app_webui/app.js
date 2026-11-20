@@ -1258,6 +1258,12 @@
       event.currentTarget.setAttribute("aria-pressed", String(!showing));
     });
     $("#providerServiceList").addEventListener("click", (event) => {
+      const testAll = event.target.closest("[data-provider-test-all]");
+      if (testAll) { testAllProviders(); return; }
+      const test = event.target.closest("[data-provider-test]");
+      if (test) { testProviderCard(test.dataset.providerTest); return; }
+      const embeddingDefault = event.target.closest("[data-provider-embedding-default]");
+      if (embeddingDefault) { setDefaultEmbeddingProvider(embeddingDefault.dataset.providerEmbeddingDefault, embeddingDefault); return; }
       const create = event.target.closest("[data-provider-create]");
       if (create) { beginNewProvider("deepseek"); return; }
       const edit = event.target.closest("[data-provider-edit]");
@@ -1513,7 +1519,7 @@
     toast: (...args) => toast(...args),
   });
 
-  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, reloadProviderServices, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderServiceKind, syncProviderThinkingControl, testSelectedProvider, updateProviderDirty } = createPageController("createModelServices", {
+  const { applyProviderPreset, beginNewProvider, bindProviderModelCombobox, clearProviderModels, clearProviderTest, deleteProvider, deleteSelectedProvider, discoverProviderModels, editProvider, guardProviderDraft, inferProviderModalities, isProviderSaving, providerCapabilityLabel, providerThinkingSupported, reloadProviderServices, renderProviderServices, requestProviderOverview, saveProvider, setProviderDefault, setProviderThinking, showProviderOverview, syncProviderServiceKind, syncProviderThinkingControl, testSelectedProvider, testProviderCard, testAllProviders, setDefaultEmbeddingProvider, updateProviderDirty } = createPageController("createModelServices", {
     $,
     $$,
     api: (...args) => api(...args),

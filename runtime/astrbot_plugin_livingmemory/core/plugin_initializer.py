@@ -402,3 +402,6 @@ class PluginInitializer(InitializerFaissMixin, InitializerFinalizeMixin):
             except asyncio.CancelledError:
                 pass
         self._retry_task = None
+        failover = getattr(self, "embedding_failover", None)
+        if failover is not None:
+            await failover.close()

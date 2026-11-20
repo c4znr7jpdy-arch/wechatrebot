@@ -61,6 +61,7 @@ class IndexValidator(IndexValidatorRebuildMixin):
 
     def get_provider_fingerprint(self) -> str:
         provider = getattr(self.faiss_db, "embedding_provider", None)
+        provider = getattr(provider, "fingerprint_provider", provider)
         provider_config = getattr(provider, "provider_config", {}) or {}
         if not isinstance(provider_config, dict):
             provider_config = {}
@@ -101,25 +102,30 @@ class IndexValidator(IndexValidatorRebuildMixin):
             "dimension": dimension,
             "dimensions_mode": provider_config.get("embedding_dimensions_mode"),
             "input_type": provider_config.get("input_type"),
+            "api_base": provider_config.get("embedding_api_base") or provider_config.get("api_base"),
         }
         encoded = json.dumps(
             payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
+    @staticmethod
+    async def _ensure_provider_marker_table(db) -> None:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS migration_status (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+
     async def provider_fingerprint_changed(self) -> bool:
         """Adopt legacy indexes once, then detect semantic provider changes."""
         current = self.get_provider_fingerprint()
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS migration_status (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TEXT
-                )
-                """
-            )
+            await self._ensure_provider_marker_table(db)
             cursor = await db.execute(
                 "SELECT value FROM migration_status WHERE key = ?",
                 ("document_vector_provider_fingerprint",),
@@ -140,6 +146,7 @@ class IndexValidator(IndexValidatorRebuildMixin):
     async def record_provider_fingerprint(self) -> None:
         current = self.get_provider_fingerprint()
         async with aiosqlite.connect(self.db_path) as db:
+            await self._ensure_provider_marker_table(db)
             await db.execute(
                 """
                 INSERT OR REPLACE INTO migration_status(key, value, updated_at)

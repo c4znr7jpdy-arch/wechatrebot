@@ -9,6 +9,7 @@ from typing import Any
 
 from .brand import BrandProfile
 from .feature_policy import RETIRED_PLUGIN_MODULES
+from .embedding_default import EMBEDDING_MODULE, selected_embedding_id
 from .json_io import write_json_atomic
 from .provider import (
     provider_service_label,
@@ -246,6 +247,7 @@ class ProviderService:
     thinking_enabled: bool = True
     service_kind: str = "chat"
     modalities: tuple[str, ...] = ("text", "image", "audio")
+    is_default_embedding: bool = False
 
     @property
     def thinking_supported(self) -> bool:
@@ -269,6 +271,7 @@ class ProviderService:
             "configured": self.configured,
             "api_key_configured": bool(self.api_key),
             "is_default": self.is_default,
+            "is_default_embedding": self.is_default_embedding,
             "is_recommended": self.is_recommended,
             "thinking_supported": self.thinking_supported,
             "thinking_enabled": self.thinking_enabled,
@@ -314,6 +317,7 @@ def _provider_reference_files(
     provider_ids: tuple[str, ...],
     *,
     strict: bool,
+    config_snapshots: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, tuple[tuple[str, Path, dict[str, Any]], ...]]:
     install = Path(root).expanduser().resolve()
     config_root = install / "app" / "astrbot" / "data" / "config"
@@ -331,10 +335,13 @@ def _provider_reference_files(
                     f"{path.name} 无法读取；为避免留下失效模型引用，暂不能删除服务。"
                 ) from None
             continue
+        module_name = path.name[: -len("_config.json")]
+        if config_snapshots is not None:
+            config_snapshots[module_name] = payload
         for provider_id, matches in references.items():
             _, count = replace_provider_value(payload, provider_id, provider_id)
             if count:
-                matches.append((path.name[: -len("_config.json")], path, payload))
+                matches.append((module_name, path, payload))
     return {provider_id: tuple(matches) for provider_id, matches in references.items()}
 
 
@@ -542,9 +549,12 @@ def load_provider_services(
     # A catalog request can contain many models. Read each plugin config once
     # for this request; later requests and destructive checks still read fresh
     # files through the same exact-value matching rules.
+    config_snapshots: dict[str, dict[str, Any]] = {}
     references = _provider_reference_files(
         install, tuple(item.provider_id for item in services), strict=False,
+        config_snapshots=config_snapshots,
     )
+    embedding_id = selected_embedding_id(config_snapshots.get(EMBEDDING_MODULE, {}), services)
     services = [
         ProviderService(
             provider_id=item.provider_id,
@@ -559,6 +569,7 @@ def load_provider_services(
             thinking_enabled=item.thinking_enabled,
             service_kind=item.service_kind,
             modalities=item.modalities,
+            is_default_embedding=item.provider_id == embedding_id,
         )
         for item in services
     ]
