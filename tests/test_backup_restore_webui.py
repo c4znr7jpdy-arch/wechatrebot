@@ -75,7 +75,7 @@ def test_restore_refreshes_model_snapshot(browser, manager_url, tmp_path, width)
         _restore(page)
         expect(page.locator("#modalBackdrop")).to_be_hidden()
         page.locator('[data-settings-tab="model"]').click()
-        expect(page.locator("#providerServiceList")).to_contain_text("备份中的模型")
+        expect(page.locator('[data-provider-card="custom/restored"] .provider-service-copy strong')).to_have_text("restored-model")
         assert page.evaluate("restoreWrites") == 1
         assert not errors, errors
         assert page.url == manager_url and page.title()
@@ -202,7 +202,7 @@ def test_restore_readback_failure_only_retries_reads_and_blocks_stale_pages(brow
         page.locator("#restoreBackup").click()
         expect(page.locator("#restoreBackup")).to_have_text("选择恢复")
         page.locator('[data-settings-tab="model"]').click()
-        expect(page.locator("#providerServiceList")).to_contain_text("备份中的模型")
+        expect(page.locator('[data-provider-card="custom/restored"] .provider-service-copy strong')).to_have_text("restored-model")
         assert page.evaluate("restoreWrites") == 1
         assert page.evaluate("restoreReads") == 3
     finally:
