@@ -2110,3 +2110,185 @@ def test_plugin_page_upload_forwards_large_audio_to_the_selected_feature() -> No
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_has_visible_features_checks_manifest_without_full_catalog(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "empty_install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat)
+    assert PluginCenterService(install).has_visible_features() is False
+
+    angel = install / "app" / "astrbot" / "data" / "plugins" / "astrbot_plugin_angel_heart"
+    angel.mkdir(parents=True)
+    (angel / "metadata.yaml").write_text(
+        "name: astrbot_plugin_angel_heart\n", encoding="utf-8"
+    )
+    assert PluginCenterService(install).has_visible_features() is False
+
+    configured_root = tmp_path / "configured"
+    configured_root.mkdir()
+    configured_install, _ = _install(configured_root)
+    assert PluginCenterService(configured_install).has_visible_features() is True
+
+
+def test_runtime_plugin_states_queries_plugins_once_when_unpatched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install, _ = _install(tmp_path)
+    service = PluginCenterService(install)
+    calls: list[tuple[str, str]] = []
+
+    def fake_raw_request(method: str, path: str, **_kwargs):
+        calls.append((method, path))
+        if path == "/api/v1/system-config":
+            payload = {"status": "ok", "data": {"config": {}}}
+        else:
+            payload = {
+                "status": "ok",
+                "data": [{"name": "sample_configurable_feature", "activated": True}],
+            }
+        return (
+            200,
+            {"Content-Type": "application/json"},
+            json.dumps(payload).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(service.engine, "raw_request", fake_raw_request)
+
+    available, states = service._runtime_plugin_states()
+
+    assert available is True
+    assert states == {"sample_configurable_feature": True}
+    assert calls == [
+        ("GET", "/api/v1/plugins"),
+        ("GET", "/api/v1/system-config"),
+    ]
+
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+    assert service._runtime_plugin_states() == (False, {})
+    assert calls == [
+        ("GET", "/api/v1/plugins"),
+        ("GET", "/api/v1/system-config"),
+    ]
+
+
+def test_engine_api_raw_request_reads_settings_once_when_unpatched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install, _ = _install(tmp_path)
+    client = EngineApiClient(install)
+    settings_reads = 0
+    real_settings = client._settings
+
+    def counted_settings():
+        nonlocal settings_reads
+        settings_reads += 1
+        return real_settings()
+
+    class Response:
+        status = 200
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self) -> bytes:
+            return b'{"status":"ok","data":[]}'
+
+    monkeypatch.setattr(client, "_settings", counted_settings)
+    monkeypatch.setattr(engine_api, "urlopen", lambda _req, *, timeout: Response())
+
+    status, _headers, raw = client.raw_request("GET", "/api/v1/plugins")
+
+    assert status == 200
+    assert json.loads(raw) == {"status": "ok", "data": []}
+    assert settings_reads == 1
+
+
+def test_plugin_detail_skips_unrelated_plugin_schemas_and_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install, public_id = _install(tmp_path)
+    other = install / "app" / "astrbot" / "data" / "plugins" / "other_feature"
+    (other / "pages" / "extra").mkdir(parents=True)
+    (other / "pages" / "extra" / "index.html").write_text(
+        "<!doctype html><title>extra</title>", encoding="utf-8"
+    )
+    (other / "_conf_schema.json").write_text(
+        json.dumps(
+            {
+                "group": {
+                    "type": "object",
+                    "items": {"flag": {"type": "bool", "default": True}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = PluginCenterService(install)
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+
+    read_paths: list[Path] = []
+    real_read_text = Path.read_text
+
+    def tracked_read_text(self: Path, *args, **kwargs) -> str:
+        read_paths.append(self)
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+
+    detail = service.detail(public_id)
+
+    assert detail["configuration"] == "schema-and-page"
+    assert "model_group" in detail["schema"]
+    assert not any("other_feature" in str(path) for path in read_paths)
+
+
+def test_local_web_handler_rejects_negative_and_invalid_content_length() -> None:
+    from http.client import HTTPConnection
+
+    class FakeService:
+        engine = SimpleNamespace(
+            raw_request=lambda *_args, **_kwargs: {"status": "ok", "data": {}}
+        )
+
+        def catalog(self):
+            return {"plugins": []}
+
+        def resolve_extension_proxy_target(self, raw_path: str):
+            return raw_path
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(FakeService()))  # type: ignore[arg-type]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    base = f"http://127.0.0.1:{port}"
+    try:
+        for bad_length in ("-1", "abc"):
+            conn = HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                conn.putrequest(
+                    "POST",
+                    "/api/plug/astrbot_plugin_mimo_tts_clone/upload_voice_sample",
+                )
+                conn.putheader("Host", f"127.0.0.1:{port}")
+                conn.putheader("Origin", base)
+                conn.putheader("Content-Type", "application/json")
+                conn.putheader("Content-Length", bad_length)
+                conn.endheaders()
+                response = conn.getresponse()
+                response.read()
+                assert response.status == 400
+            finally:
+                conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

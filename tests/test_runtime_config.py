@@ -583,3 +583,61 @@ def test_runtime_preparation_repairs_existing_embedding_without_replacing_bindin
     assert fixed["provider"][0]["id"] == "shared/vector"
     assert fixed["provider_sources"][0]["embedding_api_key"] == "secret"
     assert fixed["provider_sources"][0]["type"] == "openai_chat_completion"
+
+
+def test_config_file_lock_serializes_runtime_and_customer_config_writes(
+    tmp_path: Path,
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from wechatrebot_manager import customer_config, runtime_config
+
+    assert customer_config.CONFIG_FILE_LOCK is runtime_config.CONFIG_FILE_LOCK
+
+    install = tmp_path / "install"
+    wechat = tmp_path / "Weixin.exe"
+    wechat.write_bytes(b"placeholder")
+    write_runtime_configs(install, wechat)
+    for plugin_idx in range(3):
+        (
+            install / "app" / "astrbot" / "data" / "plugins" / f"plugin_{plugin_idx}"
+        ).mkdir(parents=True, exist_ok=True)
+
+    started = threading.Event()
+    finished = threading.Event()
+
+    def blocked_write() -> None:
+        started.set()
+        write_runtime_configs(install, wechat)
+        finished.set()
+
+    with customer_config.CONFIG_FILE_LOCK:
+        worker = threading.Thread(target=blocked_write)
+        worker.start()
+        assert started.wait(timeout=2)
+        assert not finished.wait(timeout=0.1)
+
+    worker.join(timeout=5)
+    assert finished.is_set()
+
+    def mixed_update(idx: int) -> None:
+        if idx % 2 == 0:
+            write_runtime_configs(install, wechat)
+        else:
+            customer_config.set_plugin_enabled(
+                install, f"plugin_{idx % 3}", idx % 4 != 1
+            )
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(mixed_update, range(24)))
+
+    cmd_cfg = json.loads(
+        (install / "app" / "astrbot" / "data" / "cmd_config.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    manager_cfg = json.loads(
+        (install / "config" / "manager.json").read_text(encoding="utf-8")
+    )
+    assert "provider_settings" in cmd_cfg
+    assert "ports" in manager_cfg

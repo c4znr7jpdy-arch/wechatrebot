@@ -162,6 +162,14 @@ def test_base_contract_changes_are_rejected_before_staging(tmp_path, missing):
     assert not (install / "updates").exists()
 
 
+def test_base_inputs_include_background_permissions_patch():
+    local = _script("update_local_incremental")
+    assert (
+        local.BASE_INPUTS.get("patches/astrbot-4.26.6-background-permissions.patch")
+        == "legal/corresponding-source/astrbot-4.26.6-background-permissions.patch"
+    )
+
+
 def test_source_scopes_preserve_user_configuration_and_retire_only_owned_plugins(tmp_path):
     local = _script("update_local_incremental")
     source, install = tmp_path / "source", tmp_path / "install"

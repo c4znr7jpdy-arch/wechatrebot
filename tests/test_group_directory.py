@@ -364,3 +364,57 @@ def test_qrcode_request_only_accepts_bounded_explicit_paused_denial(tmp_path, mo
     if paused:
         assert caught.value.code == "automation_paused"
         assert "运行中心" in str(caught.value)
+
+
+def test_list_releases_directory_lock_before_request_and_rejects_stale_account(
+    tmp_path, monkeypatch
+):
+    import threading
+    from types import SimpleNamespace
+
+    obj, _, _ = service(tmp_path, monkeypatch)
+    current = ["wxid_first"]
+    lock_free_during_request = []
+
+    monkeypatch.setattr(
+        directory,
+        "probe_bridge_health",
+        lambda *_args, **_kw: SimpleNamespace(
+            port=5000,
+            status_available=True,
+            wechat_logged_in=True,
+            wechat_identity=current[0],
+            reason="",
+        ),
+    )
+
+    def request(_port, _token, account, path, **_kw):
+        assert path == "/api/manager/groups"
+        if account == "wxid_first":
+            def switch_account():
+                acquired = obj._lock.acquire(blocking=False)
+                lock_free_during_request.append(acquired)
+                if acquired:
+                    obj._lock.release()
+                current[0] = "wxid_second"
+                obj.list(True, include_portraits=False)
+
+            worker = threading.Thread(target=switch_account)
+            worker.start()
+            worker.join(timeout=5)
+            return {
+                "items": [{"group_id": "stale@chatroom", "name": "Stale", "member_count": 3}]
+            }
+        return {
+            "items": [{"group_id": "fresh@chatroom", "name": "Fresh", "member_count": 5}]
+        }
+
+    monkeypatch.setattr(obj, "_request", request)
+
+    result = obj.list(True, include_portraits=False)
+    latest = obj.list(include_portraits=False)
+
+    assert lock_free_during_request == [True]
+    assert "stale@chatroom" not in [item["group_id"] for item in result["items"]]
+    assert [item["group_id"] for item in latest["items"]] == ["fresh@chatroom"]
+    assert obj._account == "wxid_second"

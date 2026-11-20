@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from wechatrebot_manager import control_center, customer_maintenance, engine_api, group_directory, runtime_status
+from wechatrebot_manager import app_shell, customer_maintenance, engine_api, group_directory, lifecycle, runtime_status
 from wechatrebot_manager.customer_maintenance import CustomerMaintenanceService, MaintenanceBusyError
 from wechatrebot_manager.licensing.bundle import install_runtime_bundle
 from wechatrebot_manager.runtime_config import RuntimePorts
@@ -65,15 +65,18 @@ def test_schedule_account_cannot_be_borrowed_from_another_installation(installat
         unrelated._authorize_job(row)
 
 
-def test_control_center_refreshes_its_own_root_for_maintenance(installations):
+def test_application_api_refreshes_its_own_root_for_maintenance(installations, monkeypatch):
     active, stopped, _ = installations
-    first = SimpleNamespace(install_root=active, last_snapshot=RuntimeSnapshot(False, False, ""))
-    second = SimpleNamespace(install_root=stopped, last_snapshot=RuntimeSnapshot(True, True, "wxid_other"))
-    assert control_center.ControlCenter._runtime_ports_used(first) is True
-    assert control_center.ControlCenter._runtime_ports_used(second) is False
+    monkeypatch.setattr(lifecycle, "installation_services_stopped", lambda _root: True)
+    first = app_shell.ApplicationApi(active, development=True)
+    second = app_shell.ApplicationApi(stopped, development=True)
+    first._lifecycle._runtime = RuntimeSnapshot(False, False, "")
+    second._lifecycle._runtime = RuntimeSnapshot(True, True, "wxid_other")
+    assert first._runtime_active() is True
+    assert second._runtime_active() is False
 
 
-def test_invalid_port_config_blocks_backup_schedule_and_control_center(tmp_path, monkeypatch):
+def test_invalid_port_config_blocks_backup_schedule_and_application_api(tmp_path, monkeypatch):
     configured(tmp_path, RuntimePorts())
     (tmp_path / "config/manager.json").write_text('{"ports":{"bridge_callback":false}}', encoding="utf-8")
     monkeypatch.setattr(runtime_status, "port_accepting", lambda *_: pytest.fail("invalid ports must not probe"))
@@ -81,19 +84,17 @@ def test_invalid_port_config_blocks_backup_schedule_and_control_center(tmp_path,
         CustomerMaintenanceService(tmp_path).create_backup()
     with pytest.raises(ValueError):
         ScheduleService(tmp_path)._runtime_account()
-    center = SimpleNamespace(install_root=tmp_path)
-    assert control_center.ControlCenter._runtime_ports_used(center) is True
+    api = app_shell.ApplicationApi(tmp_path, development=True)
+    assert api._runtime_active() is True
 
 
-def test_control_center_update_refuses_invalid_ports_before_handoff(tmp_path, monkeypatch):
+def test_application_api_update_refuses_invalid_ports_before_handoff(tmp_path, monkeypatch):
     configured(tmp_path, RuntimePorts())
     (tmp_path / "config/manager.json").write_text('{"ports":null}', encoding="utf-8")
-    errors = []
-    dialog = SimpleNamespace(exists=lambda: True, set_error=errors.append)
-    center = SimpleNamespace(install_root=tmp_path, update_dialog=dialog)
-    monkeypatch.setattr(control_center.sys, "frozen", True, raising=False)
-    control_center.ControlCenter._begin_update(center, SimpleNamespace())
-    assert len(errors) == 1
+    monkeypatch.setattr(runtime_status, "port_accepting", lambda *_: pytest.fail("invalid ports must not probe"))
+    api = app_shell.ApplicationApi(tmp_path, development=True)
+    with pytest.raises(ValueError):
+        api._lifecycle.force_stop_for_update()
 
 
 def test_guard_default_source_keeps_runtime_account_bound_to_root(tmp_path, monkeypatch):

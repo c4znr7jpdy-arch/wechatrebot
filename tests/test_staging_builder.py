@@ -653,3 +653,30 @@ def test_staging_sanitizes_active_and_documented_project_credentials(
         'authorization: "your-value-here"\n'
         '"session_id": "your-value-here"\n'
     )
+
+
+def test_staging_applies_plugin_patches_when_output_is_outside_commercial_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _builder()
+    commercial = tmp_path / "commercial"
+    output = tmp_path / "external-staging"
+    patches = commercial / "patches"
+    plugin = output / "app" / "astrbot" / "data" / "plugins" / "demo_plugin"
+    patches.mkdir(parents=True)
+    plugin.mkdir(parents=True)
+    patch = patches / "astrbot-plugin-demo_plugin.patch"
+    patch.write_text("base", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+
+    module._apply_plugin_patches(commercial, output)
+
+    applied = [call for call in calls if "--check" not in call[0]]
+    assert len(applied) == 1
+    assert Path(applied[0][1]["cwd"]).resolve() == plugin.resolve()
+    assert not any(arg.startswith("--directory=") for arg in applied[0][0])
