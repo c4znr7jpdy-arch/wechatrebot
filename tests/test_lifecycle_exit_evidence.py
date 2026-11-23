@@ -1,11 +1,15 @@
 """Unexpected exits retain process facts before the supervisor clears them."""
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from wechatrebot_manager.activity_service import ActivityService
+from wechatrebot_manager.customer_maintenance import CustomerMaintenanceService
+from wechatrebot_manager.events import EventStore
+from wechatrebot_manager.launcher import AdoptedProcess, ProcessIdentity
 from wechatrebot_manager.lifecycle import LifecycleController, LifecycleState
 from wechatrebot_manager.runtime_status import RuntimeSnapshot
 
@@ -72,7 +76,7 @@ def test_simultaneous_exits_record_each_service_once(tmp_path):
     ]
 
 
-def test_failed_cleanup_keeps_stop_error_and_process_ownership(tmp_path):
+def test_failed_cleanup_keeps_stop_error_and_process_ownership(tmp_path, monkeypatch):
     controller, supervisor = controller_with_services(
         tmp_path, [service("new-hook-bridge", 1), service("astrbot", None)], stop_fails=True,
     )
@@ -80,6 +84,20 @@ def test_failed_cleanup_keeps_stop_error_and_process_ownership(tmp_path):
     assert failed.error.code == "13008" and failed.can_stop and not failed.can_start
     assert controller._supervisor is supervisor and len(supervisor.running) == 2
     assert not any(record.get("code") == "13002" for record in controller.events.recent())
+    controller.refresh()
+    first, = controller.events.runtime_outcomes()
+    assert first["event"] == "exit_observed"
+    assert first["service"] == "new-hook-bridge" and first["exit_code"] == 1
+
+    from wechatrebot_manager import events
+
+    recorded = events.log_timestamp(first["time"])
+    monkeypatch.setattr(events.time, "time", lambda: recorded + 3 * 24 * 60 * 60)
+    assert EventStore(tmp_path).recent() == ()
+    export = CustomerMaintenanceService(tmp_path).export_diagnostics(include_activity=True)
+    report = json.loads(Path(export["path"]).read_text(encoding="utf-8"))
+    assert report["runtime_outcomes"] == [first]
+    assert "private-argument" not in json.dumps(first) and "private-env" not in json.dumps(first)
 
 
 def test_licensed_core_exit_preserves_bridge_and_exit_evidence(tmp_path):
@@ -94,6 +112,49 @@ def test_licensed_core_exit_preserves_bridge_and_exit_evidence(tmp_path):
     error = next(record for record in controller.events.recent() if record.get("code") == "13004")
     assert error["details"]["technical"]["exited_services"] == [{"service": "回复引擎", "exit_code": 7}]
     assert "wxid_private_account" not in json.dumps(error)
+    outcome, = controller.events.runtime_outcomes()
+    assert outcome["exit_code"] == 7 and outcome["authorization"] == "running"
+    assert "wxid_private_account" not in json.dumps(outcome)
+
+
+@pytest.mark.parametrize("exit_code,event", [(0, "exit_observed"), (None, "authorization_stop_requested")])
+def test_licensed_core_retains_evidence_when_authorization_expires(tmp_path, exit_code, event):
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    controller.start()
+    core = next(item for item in holders[0].running if item.spec.name == "astrbot")
+    core.process.code = exit_code
+    license.valid = False
+
+    assert controller.refresh().state == LifecycleState.LICENSE_PAUSED
+    controller.refresh()
+    outcome, = controller.events.runtime_outcomes()
+    assert outcome["event"] == event and outcome["authorization"] == "expired"
+    assert outcome["exit_code"] == exit_code and outcome["service"] == "astrbot"
+    assert world["bridge"] and not world["core"]
+
+
+def test_explicit_stop_does_not_record_an_exit(tmp_path):
+    controller, license, world, _ = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    controller.start()
+    controller.request_stop()
+    controller.refresh()
+
+    assert controller.events.runtime_outcomes() == ()
+
+
+def test_adopted_exit_records_unknown_status(tmp_path):
+    bridge = service("new-hook-bridge", None)
+    bridge.process = AdoptedProcess(1, ProcessIdentity("python.exe", 100), lambda _: None)
+    controller, _ = controller_with_services(tmp_path, [bridge], stop_fails=True)
+    controller.refresh()
+
+    outcome, = controller.events.runtime_outcomes()
+    assert outcome["event"] == "process_no_longer_owned"
+    assert outcome["exit_code"] is None
 
 
 def test_live_services_do_not_emit_exit_errors(tmp_path):
