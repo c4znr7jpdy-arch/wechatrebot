@@ -17,7 +17,7 @@ from .environment import (
 from .error_catalog import ErrorCatalog, ErrorDefinition, load_error_catalog
 from .events import EventStore
 from .launcher import (
-    ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec, ServiceStartCancelled,
+    AdoptedProcess, ProcessLike, ProcessSupervisor, ServiceLaunchError, ServiceSpec, ServiceStartCancelled,
     build_service_specs, capture_update_wechat_process, installation_services_stopped,
     force_stop_update_processes,
 )
@@ -153,6 +153,7 @@ class LifecycleController:
         self._adoption_error: ErrorDefinition | None = None
         self._runtime_config_error: ErrorDefinition | None = None
         self._supervisor: SupervisorLike | None = None
+        self._recorded_runtime_processes: dict[str, ProcessLike] = {}
         self._environment = self._environment_checker(self.install_root)
         self._runtime = RuntimeSnapshot(False, False, "", account_status_available=False)
         self._running_events_emitted = False
@@ -266,6 +267,22 @@ class LifecycleController:
             services.append({"service": getattr(spec, "label", getattr(spec, "name", "unknown")),
                              "exit_code": code})
         return {"operation": "runtime_supervision", "technical": {"exited_services": services}}
+
+    def _record_runtime_outcome(self, item, code: int | None, authorization: str) -> None:
+        if self.state == LifecycleState.STOPPING:
+            return
+        service, process = item.spec.name, item.process
+        if self._recorded_runtime_processes.get(service) is process:
+            return
+        if code is None:
+            event = "authorization_stop_requested"
+        elif isinstance(process, AdoptedProcess):
+            # The adopted facade detects lost identity and has no OS exit status.
+            event, code = "process_no_longer_owned", None
+        else:
+            event = "exit_observed"
+        if self.events.record_runtime_outcome(event, service, authorization, code):
+            self._recorded_runtime_processes[service] = process
 
     def _stop_services(
         self, names: tuple[str, ...] | None = None, *,
@@ -604,7 +621,8 @@ class LifecycleController:
                 return self.view()
             adoption_error = self._adoption_error if self._has_incomplete_adoption() else None
             try:
-                licensed_view = self._refresh_licensed()
+                status = self._license_snapshot()
+                licensed_view = self._refresh_licensed(status)
             except Exception:
                 if self._stop_error is None:
                     raise
@@ -629,6 +647,9 @@ class LifecycleController:
                     and (code := item.process.poll()) is not None
                 ]
                 if exited:
+                    if not status["enabled"]:
+                        for item, code in exited:
+                            self._record_runtime_outcome(item, code, "disabled")
                     details = self._service_exit_details(exited)
                     try:
                         self._stop_services()
@@ -651,8 +672,7 @@ class LifecycleController:
                 self.state = LifecycleState.STOPPED
             return self.view()
 
-    def _refresh_licensed(self) -> LifecycleView | None:
-        status = self._license_snapshot()
+    def _refresh_licensed(self, status: dict) -> LifecycleView | None:
         if not status["enabled"]:
             return None
         supervisor = self._supervisor
@@ -672,16 +692,28 @@ class LifecycleController:
             return self.view()
         by_name = {item.spec.name: item for item in supervisor.running}
         bridge = by_name.get("new-hook-bridge")
-        if bridge is not None and bridge.process.poll() is not None:
+        core = by_name.get("astrbot")
+        authorization = status.get("state", "unknown")
+        if status["can_run"]:
+            authorization = "running"
+        if bridge is not None and (bridge_exit_code := bridge.process.poll()) is not None:
+            self._record_runtime_outcome(bridge, bridge_exit_code, authorization)
+            if core is not None and (core_exit_code := core.process.poll()) is not None:
+                self._record_runtime_outcome(core, core_exit_code, authorization)
             self._pause_license()
             return None  # The existing lifecycle handles an unexpected bridge crash.
-        core = by_name.get("astrbot")
         grant = status
         if core is not None and not self._runtime.account_status_available:
             # Check the existing grant without substituting the bound account
             # for a fresh login probe. Explicit authorization denials still win.
             grant = self.licenses.snapshot(str(status.get("account") or ""))
-        if core is not None and (core_exit_code := core.process.poll()) is not None and grant["can_run"]:
+            authorization = (
+                "account_status_unavailable" if grant["can_run"] else grant.get("state", "unknown")
+            )
+        core_exit_code = core.process.poll() if core is not None else None
+        if core_exit_code is not None:
+            self._record_runtime_outcome(core, core_exit_code, authorization)
+        if core is not None and core_exit_code is not None and grant["can_run"]:
             details = self._service_exit_details([(core, core_exit_code)])
             self._pause_license()
             self._stop_services(("astrbot",), timeout_seconds=3)
@@ -697,6 +729,8 @@ class LifecycleController:
                 self._error = None
                 return self.view()
             # The runtime also enforces this independently when the manager is closed.
+            if core_exit_code is None:
+                self._record_runtime_outcome(core, None, authorization)
             self._pause_license()
             self._stop_services(("astrbot",), timeout_seconds=3)
             self._running_events_emitted = False

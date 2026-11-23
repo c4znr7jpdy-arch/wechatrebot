@@ -37,6 +37,15 @@ EVENT_TYPES = frozenset(
 _SENSITIVE_KEY = re.compile(r"(?i)(api.?key|token|authorization|secret|password)")
 _STORE_LOCK = threading.RLock()
 _MAX_LOG_BYTES = 2 * 1024 * 1024
+_RUNTIME_RETENTION_SECONDS = 7 * 24 * 60 * 60
+_RUNTIME_RECORD_LIMIT = 80
+_RUNTIME_EVENTS = frozenset({"exit_observed", "process_no_longer_owned", "authorization_stop_requested"})
+_RUNTIME_COMPONENTS = frozenset({"astrbot", "new-hook-bridge"})
+_RUNTIME_AUTH_STATES = frozenset({
+    "disabled", "running", "account_status_unavailable", "account_mismatch", "expired",
+    "offline_expired", "revoked", "license_revoked", "license_unavailable",
+    "subscription_expired", "clock_error", "paused", "ready",
+})
 
 
 def _safe_value(value: object) -> object:
@@ -91,6 +100,7 @@ class EventStore:
     def __init__(self, install_root: str | Path) -> None:
         root = Path(install_root).expanduser().resolve()
         self.path = root / "logs" / "lifecycle-events.jsonl"
+        self.runtime_path = self.path.with_name("runtime-outcomes.jsonl")
         self._lock = _STORE_LOCK
         self._last_pruned = 0.0
 
@@ -250,6 +260,66 @@ class EventStore:
         cutoff = time.time() - ACTIVITY_RETENTION_SECONDS
         return tuple(current for item in records[-limit:]
                      if (current := self._retained(item, cutoff)) is not None)
+
+    def _runtime_records(self) -> list[dict[str, object]]:
+        try:
+            text, _ = read_log_tail(self.runtime_path, max_bytes=32 * 1024, max_lines=_RUNTIME_RECORD_LIMIT)
+        except FileNotFoundError:
+            return []
+        cutoff = time.time() - _RUNTIME_RETENTION_SECONDS
+        records = []
+        for item in self._records(line for line in text.splitlines() if len(line) <= 512):
+            timestamp = log_timestamp(item.get("time"))
+            if timestamp is not None and timestamp >= cutoff:
+                record = self._runtime_record(
+                    datetime.fromtimestamp(timestamp).astimezone().isoformat(timespec="seconds"),
+                    item.get("event"), item.get("service"), item.get("authorization"), item.get("exit_code"),
+                )
+                if record is not None:
+                    records.append(record)
+        return records
+
+    @staticmethod
+    def _runtime_record(
+        timestamp: str, event: object, service: object, authorization: object, exit_code: object,
+    ) -> dict[str, object] | None:
+        if (not isinstance(event, str) or event not in _RUNTIME_EVENTS
+                or not isinstance(service, str) or service not in _RUNTIME_COMPONENTS):
+            return None
+        if not isinstance(authorization, str) or authorization not in _RUNTIME_AUTH_STATES:
+            authorization = "unknown"
+        if event != "exit_observed" or type(exit_code) is not int or not -(2**31) <= exit_code < 2**32:
+            exit_code = None
+        return {
+            "time": timestamp, "event": event, "service": service,
+            "authorization": authorization, "exit_code": exit_code,
+        }
+
+    def record_runtime_outcome(
+        self, event: str, service: str, authorization: str, exit_code: int | None,
+    ) -> bool:
+        with self._lock:
+            record = self._runtime_record(
+                datetime.now().astimezone().isoformat(timespec="seconds"),
+                event, service, authorization, exit_code,
+            )
+            if record is None:
+                return False
+            try:
+                records = self._runtime_records()
+                records.append(record)
+                self._write(self.runtime_path, records[-_RUNTIME_RECORD_LIMIT:])
+            except OSError:
+                # Diagnostic storage must not interfere with service teardown.
+                return False
+        return True
+
+    def runtime_outcomes(self) -> tuple[dict[str, object], ...]:
+        with self._lock:
+            try:
+                return tuple(self._runtime_records())
+            except OSError:
+                return ()
 
 
 __all__ = ["EVENT_TYPES", "EventRecord", "EventStore"]

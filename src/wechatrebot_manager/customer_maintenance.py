@@ -383,7 +383,10 @@ class CustomerMaintenanceService:
         report = self.diagnostic_summary()
         if include_activity:
             from .activity_service import ActivityService
+            from .events import EventStore
+
             report["activity"] = ActivityService(self.install_root, build=activity_build).recent()
+            report["runtime_outcomes"] = EventStore(self.install_root).runtime_outcomes()
             report["privacy"]["contains_logs"] = True
             report["privacy"]["logs_redacted"] = True
         self.diagnostic_root.mkdir(parents=True, exist_ok=True)
