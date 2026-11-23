@@ -1,5 +1,6 @@
 """Unexpected exits retain process facts before the supervisor clears them."""
 
+from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -133,6 +134,36 @@ def test_licensed_core_retains_evidence_when_authorization_expires(tmp_path, exi
     assert outcome["event"] == event and outcome["authorization"] == "expired"
     assert outcome["exit_code"] == exit_code and outcome["service"] == "astrbot"
     assert world["bridge"] and not world["core"]
+
+
+@pytest.mark.parametrize("authorization", ["expired", "paused", "account_status_unavailable"])
+def test_core_exit_uses_effective_grant_when_account_probe_is_unavailable(
+    tmp_path, monkeypatch, authorization,
+):
+    controller, license, world, holders = setup_controller(tmp_path)
+    controller.connect_wechat()
+    world["account"] = license.bound = "wxid_a"
+    controller.start()
+    core = next(item for item in holders[0].running if item.spec.name == "astrbot")
+    core.process.code = 0
+    live = controller.fresh_runtime_snapshot()
+    monkeypatch.setattr(controller, "_snapshotter", lambda: replace(
+        live, wechat_identity="", account_status_available=False,
+    ))
+    snapshot = license.snapshot
+
+    def snapshot_at_exit(account):
+        status = snapshot(account)
+        if account and authorization != "account_status_unavailable":
+            status.update(can_run=False, state=authorization)
+        return status
+
+    monkeypatch.setattr(license, "snapshot", snapshot_at_exit)
+    controller.refresh()
+
+    outcome, = controller.events.runtime_outcomes()
+    assert outcome["event"] == "exit_observed" and outcome["exit_code"] == 0
+    assert outcome["authorization"] == authorization
 
 
 def test_explicit_stop_does_not_record_an_exit(tmp_path):

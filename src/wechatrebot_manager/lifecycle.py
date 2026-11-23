@@ -696,8 +696,6 @@ class LifecycleController:
         authorization = status.get("state", "unknown")
         if status["can_run"]:
             authorization = "running"
-        elif not self._runtime.account_status_available and status["authorized"]:
-            authorization = "account_status_unavailable"
         if bridge is not None and (bridge_exit_code := bridge.process.poll()) is not None:
             self._record_runtime_outcome(bridge, bridge_exit_code, authorization)
             if core is not None and (core_exit_code := core.process.poll()) is not None:
@@ -709,6 +707,9 @@ class LifecycleController:
             # Check the existing grant without substituting the bound account
             # for a fresh login probe. Explicit authorization denials still win.
             grant = self.licenses.snapshot(str(status.get("account") or ""))
+            authorization = (
+                "account_status_unavailable" if grant["can_run"] else grant.get("state", "unknown")
+            )
         core_exit_code = core.process.poll() if core is not None else None
         if core_exit_code is not None:
             self._record_runtime_outcome(core, core_exit_code, authorization)
