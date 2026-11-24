@@ -657,7 +657,7 @@ def install_payload(
     targets = {}
     for index, relative in enumerate(target_paths, start=1):
         targets[relative] = _checked_target(root, relative)
-        if progress_callback:
+        if progress_callback is not None and before_replace is not None:
             progress_callback("validate", index, len(target_paths))
     manifest_target = _checked_target(root, Path("config/installed-payload.json"))
     updates_candidate = root / "updates"
@@ -746,7 +746,7 @@ def install_payload(
                 not target.is_file() or sha256_file(target) != unstaged[relative]
             ):
                 raise PayloadError(f"未变更文件在更新准备期间已改变：{relative.as_posix()}")
-            if progress_callback:
+            if progress_callback is not None and before_replace is not None:
                 progress_callback("recheck", index, len(target_paths))
         _checked_target(root, Path("config/installed-payload.json"))
         installed_files: list[VerifiedPayloadFile] = []

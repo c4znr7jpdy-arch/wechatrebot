@@ -73,7 +73,7 @@ def test_install_skips_locked_identical_binary_but_updates_changed_files(tmp_pat
     assert replaced == [manager, install / "config/installed-payload.json"]
     assert hook.read_bytes() == b"same hook"
     assert manager.read_bytes() == b"new manager"
-    assert progress == [(phase, index, 2) for phase in ("validate", "prepare", "recheck", "install") for index in (1, 2)]
+    assert progress == [("prepare", 1, 2), ("prepare", 2, 2), ("install", 1, 2), ("install", 2, 2)]
     installed = json.loads((install / "config/installed-payload.json").read_text())
     assert installed["release_version"] == "1.0.7" and installed["release_build"] == 5
     expected = {name: hashlib.sha256(content).hexdigest().upper() for name, content in contents.items()}

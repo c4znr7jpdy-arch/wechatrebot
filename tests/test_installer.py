@@ -78,7 +78,7 @@ def test_perform_install_writes_ready_brand_and_provider(
     assert astrbot["provider_settings"]["default_personality"] == "commercial_brand"
     assert astrbot["provider_settings"]["default_provider_id"].endswith("/chat-model")
     assert astrbot["admins_id"] == ["wxid_customer_admin"]
-    assert phases == ["validate", "prepare", "recheck", "install", "configure", "configure"]
+    assert phases == ["prepare", "install", "configure", "configure"]
 
 
 def test_perform_install_does_not_require_wechat(

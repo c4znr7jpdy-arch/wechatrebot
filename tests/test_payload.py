@@ -236,9 +236,7 @@ def test_install_payload_reports_each_phase(tmp_path: Path) -> None:
     )
 
     assert events == [
-        ("validate", 1, 1),
         ("prepare", 1, 1),
-        ("recheck", 1, 1),
         ("install", 1, 1),
     ]
 
@@ -286,7 +284,7 @@ def test_packed_payload_installs_and_verifies_in_one_stream(tmp_path: Path) -> N
     )
 
     assert result.root == archive_path.resolve()
-    assert events == ["validate", "prepare", "recheck", "install"]
+    assert events == ["prepare", "install"]
     assert (tmp_path / "install" / "app" / "example.txt").read_text(
         encoding="utf-8"
     ) == "commercial payload\n"

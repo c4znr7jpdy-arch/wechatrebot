@@ -107,7 +107,12 @@ def test_component_update_uses_same_visible_handoff_without_consuming_payload(tm
     saved = json.loads(plan.plan_path.read_text("utf-8"))
     assert plan.automatic_install and saved["automatic_install"] == 1
     assert saved["consume_prepared_payload"] is False
-    assert updates.apply_update_plan(plan.plan_path, restart=False, before_wait=lambda: None) == 0
+    phases = []
+    assert updates.apply_update_plan(
+        plan.plan_path, restart=False, before_wait=lambda: None,
+        progress_callback=lambda phase, *_: phases.append(phase),
+    ) == 0
+    assert {"backup", "validate", "recheck", "install"} <= set(phases)
     assert (install / "app/astrbot/data/plugins/example/main.py").read_bytes() == b"new-plugin"
     assert (install / "runtime/unchanged.txt").read_bytes() == b"shared-runtime"
 
