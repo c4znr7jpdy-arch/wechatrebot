@@ -46,6 +46,7 @@ def test_build_can_reuse_existing_toolchain(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(builder.platform, "architecture", lambda: ("64bit", ""))
     build_python = tmp_path / "cached-python.exe"
     build_python.write_bytes(b"MZ")
+    monkeypatch.setattr(builder, "_build_update_ui", lambda output, root: output / "WeChatReBot-UpdateUI.exe")
     calls: list[list[str]] = []
 
     def fake_run(argv, **_kwargs):
@@ -57,7 +58,7 @@ def test_build_can_reuse_existing_toolchain(monkeypatch, tmp_path: Path) -> None
         elif "self-test" in argv:
             report = {
                 "ok": True, "frozen": True, "architecture": 64,
-                "manager_version": "test", "timezone_data": True,
+                "manager_version": "test", "timezone_data": True, "native_update_ui": True,
             }
             Path(argv[argv.index("--output") + 1]).write_text(json.dumps(report), encoding="utf-8")
 
@@ -79,6 +80,7 @@ def test_build_collects_timezone_package_and_requires_frozen_self_test(
     monkeypatch.setattr(builder, 'sys', SimpleNamespace(version_info=(3, 13), executable='python.exe'))
     monkeypatch.setattr(builder.platform, 'architecture', lambda: ('64bit', ''))
     calls = []
+    monkeypatch.setattr(builder, "_build_update_ui", lambda output, root: output / "WeChatReBot-UpdateUI.exe")
 
     def fake_run(argv, **_kwargs):
         calls.append(argv)
@@ -87,7 +89,7 @@ def test_build_collects_timezone_package_and_requires_frozen_self_test(
             dist.mkdir(parents=True)
             (dist / 'WeChatReBot.exe').write_bytes(b'test executable placeholder')
         elif 'self-test' in argv:
-            report = {'ok': True, 'frozen': True, 'architecture': 64, 'manager_version': 'test'}
+            report = {'ok': True, 'frozen': True, 'architecture': 64, 'manager_version': 'test', 'native_update_ui': True}
             if timezone_ready is not None:
                 report['timezone_data'] = timezone_ready
             Path(argv[argv.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
@@ -101,6 +103,7 @@ def test_build_collects_timezone_package_and_requires_frozen_self_test(
             builder.main(['--output', str(output)])
         assert not (output / 'manager-build-manifest.json').exists()
     command = next(argv for argv in calls if 'PyInstaller' in argv)
+    assert any("WeChatReBot-UpdateUI.exe" in value for value in command)
     assert any(command[i:i+2] == ['--collect-all', 'tzdata'] for i in range(len(command)))
     root = Path(__file__).parents[1]
     import tomllib

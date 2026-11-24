@@ -192,7 +192,10 @@ class UpdateApiMixin:
             message=labels.get(phase, "正在准备更新"),
             error=None,
         )
-        if completed == 1 or completed == total or percent in {10, 20, 30, 40, 50, 60, 70, 80, 90}:
+        previous = getattr(self, "_last_logged_update_progress", None)
+        milestone = completed == 1 or completed == total or percent in {10, 20, 30, 40, 50, 60, 70, 80, 90}
+        if milestone and previous != (phase, percent):
+            self._last_logged_update_progress = (phase, percent)
             logger = getattr(self, "_update_logger", None)
             release = getattr(self, "_available_update", None)
             if logger is not None:
