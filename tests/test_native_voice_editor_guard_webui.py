@@ -140,7 +140,7 @@ def test_voice_page_reselection_keeps_current_draft(guarded_voice):
 
 
 @pytest.mark.parametrize("phase", ["draft", "saving", "clean-save"])
-def test_voice_editor_protects_restore_and_update_install(guarded_voice, phase):
+def test_voice_editor_guards_restore_but_allows_confirmed_update_to_discard_drafts(guarded_voice, phase):
     view = guarded_voice
     pending = phase != "draft"
     dirty = phase != "clean-save"
@@ -155,7 +155,12 @@ def test_voice_editor_protects_restore_and_update_install(guarded_voice, phase):
       const api = window.pywebview.api;
       window.voiceMaintenanceWrites = [];
       api.restore_backup = async () => { window.voiceMaintenanceWrites.push('restore'); return {ok:true,data:{}}; };
-      api.install_update = async () => { window.voiceMaintenanceWrites.push('install'); return {ok:true,data:{accepted:true}}; };
+      api.install_update = async () => {
+        window.voiceMaintenanceWrites.push('install');
+        window.voiceUpdateStatus = {...window.voiceUpdateStatus, state:'restarting',
+          phase:'launching', confirmation_token:''};
+        return {ok:true,data:{accepted:true}};
+      };
       document.querySelector('#restoreBackup').disabled = false;
       document.querySelector('#restoreBackup').click();
     }""")
@@ -164,16 +169,31 @@ def test_voice_editor_protects_restore_and_update_install(guarded_voice, phase):
     view.page.evaluate("""() => {
       const release = {version:'1.0.1',release_id:'voice-guard-release',package_size:1000};
       window.voiceGuardState.availableUpdate = release;
-      window.pywebview.api.get_update_status = async () => ({ok:true,data:{
+      window.voiceUpdateStatus = {
         state:'ready',phase:'ready_to_install',version:release.version,release_id:release.release_id,
-        confirmation_token:'voice-guard-consent'}});
+        confirmation_token:'voice-guard-consent'};
+      window.pywebview.api.get_update_status = async () => ({ok:true,data:window.voiceUpdateStatus});
       return window.voiceGuardUpdates.refreshUpdate(true);
     }""")
     expect(view.page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
-    view.page.locator("#modalConfirm").click()
-    expect(view.page.locator("#modalError")).to_contain_text("处理其他操作" if pending else "尚未保存")
-    assert view.page.evaluate("window.voiceMaintenanceWrites") == []
+    expect(view.page.locator("#modalMessage")).to_contain_text("丢弃未保存的修改")
     view.page.locator("#modalCancel").click()
+    expect(view.page.locator("#modalBackdrop")).to_be_hidden()
+    expect(view.field).to_have_value("维护操作前的草稿" if dirty else "已保存的风格")
+    _expect_editor(view, dirty=dirty, busy=pending)
+    assert view.page.evaluate("window.voiceMaintenanceWrites") == []
+    view.page.evaluate("window.voiceGuardUpdates.refreshUpdate(true)")
+    expect(view.page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
+    view.page.locator("#modalConfirm").click()
+    if pending:
+        expect(view.page.locator("#modalError")).to_contain_text("处理其他操作")
+        assert view.page.evaluate("window.voiceMaintenanceWrites") == []
+        view.page.locator("#modalCancel").click()
+    else:
+        expect(view.page.locator("#modalBackdrop")).to_be_hidden()
+        assert view.page.evaluate("window.voiceMaintenanceWrites") == ["install"]
+        expect(view.page.locator("#updateStatus")).to_have_text("正在重新启动管理器")
+    assert len(view.writes) == int(pending)
 
 
 def test_voice_editor_rejects_messages_from_wrong_origin_source_or_session(guarded_voice):
