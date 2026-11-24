@@ -679,14 +679,19 @@ def _verify_runtime_assets(manifest: dict, assets: list[Path], *, channel: Updat
         embedded = json.loads(bundle.read("payload/" + ENVIRONMENT_MANIFEST.as_posix()))
     if embedded != environment.manifest:
         raise ValueError("应用内的环境清单与发布清单不一致")
+    prefix = reference["url"].rsplit("/", 1)[0]
+    local_assets = {f"{prefix}/{path.name}": path for path in assets}
+    for package in environment.packages:
+        local = local_assets.get(package.url)
+        if local is not None and (local.stat().st_size != package.size or sha256_file(local) != package.sha256):
+            raise ValueError("环境包与签名环境清单不一致")
     if remote:
         verify_public_asset(reference["url"], expected_size=reference["size"],
                             expected_sha256=reference["sha256"], timeout=channel.request_timeout_seconds)
-        local_names = {path.name for path in assets}
         for package in environment.packages:
             # Newly uploaded assets were verified by _publish_assets. Historical
             # shared assets must also remain downloadable before stable changes.
-            if package.url.rsplit("/", 1)[-1] not in local_names:
+            if package.url not in local_assets:
                 verify_public_asset(package.url, expected_size=package.size,
                                     expected_sha256=package.sha256, timeout=channel.request_timeout_seconds)
 
@@ -993,11 +998,12 @@ def main(argv: list[str] | None = None) -> int:
                "started_at": datetime.now(timezone.utc).isoformat(), "status": "uploading"}
     receipt_path = output / "publication-receipt.json"
     _write_json(receipt_path, receipt)
+    application_release = bool(_load_manifest(release.manifest_path).get("runtime_environment"))
     try:
         _publish_assets(repo, tag, title=candidate["title"], notes=tuple(candidate["notes"]), version=version,
                         assets=[*assets, versioned], work_root=work_root, timeout=channel.request_timeout_seconds,
                         resume=args.resume, target=candidate["target"], channel=channel,
-                        latest=not args.prepare_only and any(path.suffix == ".wrb" for path in assets))
+                        latest=not application_release and not args.prepare_only and any(path.suffix == ".wrb" for path in assets))
     except Exception as exc:
         receipt.update(status="failed_before_promotion", error=_safe_error(exc))
         _write_json(receipt_path, receipt)
@@ -1020,13 +1026,21 @@ def main(argv: list[str] | None = None) -> int:
     _finish_publication(repo, release, channel=channel, work_root=work_root, target=candidate["target"],
                         previous=candidate.get("previous_manifest"), skip_smoke=args.skip_remote_smoke,
                         receipt=receipt)
-    if _load_manifest(release.manifest_path).get("runtime_environment"):
-        _write_json(COMMERCIAL_ROOT / "artifacts/runtime-environment/latest.json",
-                    _load_manifest(output / "runtime-environment.json"))
     try:
-        _cache_component_baselines(output, channel)
-        receipt["baseline_cache"] = "saved"
+        if application_release:
+            publish_release(repo, tag, latest=True)
+            receipt["latest_promoted"] = True
+            _write_json(COMMERCIAL_ROOT / "artifacts/runtime-environment/latest.json",
+                        _load_manifest(output / "runtime-environment.json"))
+            receipt["environment_cache"] = "saved"
+        else:
+            _cache_component_baselines(output, channel)
+            receipt["baseline_cache"] = "saved"
     except Exception as exc:
+        if application_release:
+            receipt.update(post_publish="failed", post_publish_error=_safe_error(exc))
+            _write_json(receipt_path, receipt)
+            raise
         receipt.update(baseline_cache="failed", baseline_cache_error=_safe_error(exc))
     _write_json(receipt_path, receipt)
     print(json.dumps(receipt, ensure_ascii=False, indent=2))

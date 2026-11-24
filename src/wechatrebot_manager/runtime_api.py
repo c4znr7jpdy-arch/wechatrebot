@@ -78,6 +78,8 @@ class RuntimeApiMixin:
 
             threading.Thread(target=worker, daemon=True).start()
         except Exception as exc:
+            if getattr(self, "_runtime_status", {}).get("state") == "installing":
+                self._set_runtime_status(state="failed", ready=False, message=str(exc))
             self._action_lock.release()
             self._update_lock.release()
             return self._failed(exc)

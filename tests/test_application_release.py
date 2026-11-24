@@ -117,3 +117,46 @@ def test_engine_rebuild_uses_fixed_wheel_current_patch_and_auth_bundle(tmp_path,
     wheel.write_bytes(b"changed")
     with pytest.raises(ValueError, match="校验失败"):
         builder.build_engine(root, root / "other", env, wheelhouse=wheelhouse, offline=True)
+
+
+@pytest.mark.parametrize("missing_environment", [False, True])
+def test_application_publisher_promotes_latest_only_after_environment_and_smoke(tmp_path, monkeypatch, missing_environment):
+    from test_publish_github_release import _module, _common_main_patches, _fake_build, _move_build, REPO
+    module = _module()
+    root, channel = _common_main_patches(module, monkeypatch, tmp_path, live_version="0.9.8")
+    built = _fake_build(root, module, "0.9.9", module.asset_prefix(REPO, "v0.9.9"))
+    events = []
+
+    def build(args, **kwargs):
+        assert args.application and not args.component_only
+        release, customer = _move_build(built, kwargs["output"])
+        release.manifest_path.write_text(json.dumps({"package": {}, "runtime_environment": {"id": "test"}}))
+        environment = kwargs["output"] / "runtime-environment.json"
+        environment.write_text('{"id":"test"}')
+        return release, [release.archive_path, customer.archive_path, customer.payload_path, environment]
+
+    def publish(*args, **kwargs):
+        assert kwargs["latest"] is False
+        events.append("upload")
+
+    def verify(*args, **kwargs):
+        if kwargs["remote"]:
+            events.append("environment")
+            if missing_environment:
+                raise ValueError("historical asset unavailable")
+
+    monkeypatch.setattr(module, "_build_candidate", build)
+    monkeypatch.setattr(module, "_publish_assets", publish)
+    monkeypatch.setattr(module, "_verify_runtime_assets", verify)
+    monkeypatch.setattr(module, "_finish_publication", lambda *a, **k: events.append("stable_and_smoke"))
+    monkeypatch.setattr(module, "publish_release", lambda *a, **k: events.append("latest") if k["latest"] else None)
+    monkeypatch.setattr(module, "_cache_component_baselines", lambda *a: pytest.fail("application has no component baseline"))
+    command = ["--output", str(root / "artifacts/publish"), "--yes"]
+    if missing_environment:
+        with pytest.raises(ValueError, match="historical asset"):
+            module.main(command)
+        assert events == ["upload", "environment"]
+    else:
+        assert module.main(command) == 0
+        assert events == ["upload", "environment", "stable_and_smoke", "latest"]
+        assert json.loads((root / "artifacts/runtime-environment/latest.json").read_text()) == {"id": "test"}

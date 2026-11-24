@@ -262,6 +262,22 @@ def test_runtime_api_blocks_start_and_license_connection_during_install(tmp_path
     assert not api._action_lock.locked()
 
 
+def test_runtime_install_worker_start_failure_releases_locks_and_can_retry(tmp_path, monkeypatch):
+    from test_app_shell import _api
+    from wechatrebot_manager import runtime_api
+    api = _api(tmp_path)
+    api._runtime_status = {"state": "missing", "ready": False}
+    api._lifecycle.maintenance_stopped = lambda: True
+
+    def fail(_thread):
+        raise RuntimeError("cannot start worker")
+
+    monkeypatch.setattr(runtime_api.threading.Thread, "start", fail)
+    assert api.install_runtime_environment()["ok"] is False
+    assert api._runtime_status["state"] == "failed"
+    assert not api._action_lock.locked() and not api._update_lock.locked()
+
+
 def test_application_and_environment_share_process_lock(environment_factory, tmp_path):
     from wechatrebot_manager.single_instance import SingleInstanceLock
     root = tmp_path / "install"
