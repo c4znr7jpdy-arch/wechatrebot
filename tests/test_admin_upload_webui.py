@@ -111,7 +111,7 @@ def upload_server(tmp_path):
             port = site._server.sockets[0].getsockname()[1]
             async with ClientSession() as client:
                 async def proxy(request):
-                    suffix = request.path.removeprefix("/wechatrebot-admin") or "/"
+                    suffix = request.rel_url.path_qs.removeprefix("/wechatrebot-admin") or "/"
                     headers = {key: value for key, value in request.headers.items()
                                if key.lower() not in {"host", "content-length", "transfer-encoding"}}
                     async with client.request(request.method, f"http://127.0.0.1:{port}{suffix}",

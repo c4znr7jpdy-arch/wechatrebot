@@ -185,7 +185,7 @@ async function validSubscriptionStaysActiveWhenStoppedOrDisconnected() {
     assert.equal(h.element('#licenseStatusPanel').dataset.tone, 'success');
     assert.equal(h.element('#licenseStateTitle').textContent, '订阅已生效');
     assert.equal(h.element('#licenseStateTag').textContent, '已订阅');
-    assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换续期码');
+    assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换激活码');
     assert.doesNotMatch(h.element('#licenseStateMessage').textContent, /暂停|恢复/);
     assert.equal(h.element('#licenseOptions').open, false);
     h.handlers.connect_license_wechat = () => {
@@ -259,7 +259,7 @@ async function expiryAndUnconfigured() {
     current_account: 'wxid_account_a', message: '订阅已到期，自动化已暂停。'});
   await h.ui.initialize();
   assert.equal(h.element('#licensePausedInfo').hidden, false);
-  assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换续期码');
+  assert.equal(h.element('#licenseRedeemTitle').textContent, '兑换激活码');
   assert.equal(h.element('#homeLicenseNotice').hidden, false);
   assert.equal(h.element('#licenseOpenHistory').disabled, false);
   assert.equal(h.element('#licenseOpenMaintenance').disabled, false);
@@ -594,7 +594,7 @@ async function subscriptionOptionsFollowEntitlementAndPreserveExpansion() {
   const h = startupHarness();
   await h.ui.initialize();
   assert.equal(h.element('#licenseOptions').open, false);
-  assert.equal(h.element('#licenseOptionsTitle').textContent, '续期或更换套餐');
+  assert.equal(h.element('#licenseOptionsTitle').textContent, '续费或增加换绑次数');
   h.element('#licenseOptions').open = true;
   await h.ui.onNavigate('subscription');
   assert.equal(h.element('#licenseOptions').open, true, 'A background refresh must preserve user expansion');
@@ -734,8 +734,8 @@ async function authorizationMessagesExplainTheReasonAcrossEveryEntry() {
   const cases = [
     ['revoked', /授权已撤销.*当前未授权.*付费激活码/],
     ['license_revoked', /授权已撤销.*当前未授权.*付费激活码/],
-    ['expired', /订阅已到期.*兑换续期码/],
-    ['subscription_expired', /订阅已到期.*兑换续期码/],
+    ['expired', /订阅已到期.*时长激活码/],
+    ['subscription_expired', /订阅已到期.*时长激活码/],
     ['offline_expired', /离线授权已过期.*重新验证/],
     ['lease_expired', /离线授权已过期.*重新验证/],
     ['clock_error', /校准时间.*重新验证/],
@@ -1488,6 +1488,39 @@ async function paidRedemptionInvalidatesOutstandingTrialQuery() {
   assert.equal(ended.element('#licenseTrialStatus').textContent, '你的试用已结束，可联系群主购买');
 }
 
+async function rebindCreditPreviewConfirmsBalanceWithoutStartingOrChangingExpiry() {
+  const h = harness({state: 'ready', authorized: true, account: 'wxid_customer',
+    current_account: 'wxid_customer', license_id: 'paid-license', plan: 'month', valid_until: 1800000000});
+  await h.ui.initialize();
+  await h.ui.onNavigate('subscription');
+  const expiry = h.snapshot.valid_until;
+  h.handlers.preview_activation_code = () => ({preview_id: 'credits', plan: 'month', mode: 'rebind_credit',
+    license_id: 'paid-license', account: 'wxid_customer', valid_until: expiry,
+    rebind_credits: 5, rebind_before: 3, rebind_after: 8, already_redeemed: false,
+    message: '微信换绑次数增加 5 次，套餐和到期时间不变。'});
+  await h.preview('CREDIT-CODE');
+  const details = h.element('#licenseCodePreviewDetails').innerHTML;
+  assert.match(details, /3 次 → 8 次/);
+  assert.match(details, /到期时间（不变）/);
+  assert.match(details, /wxid_customer/);
+  assert.equal(h.element('#licenseConfirmRedeem').textContent, '确认增加次数');
+  await h.click('#licenseCancelRedeem');
+  assert.equal(h.calls.some(([method]) => method === 'redeem_activation_code'), false);
+  await h.preview('CREDIT-CODE');
+  const before = h.calls.filter(([method]) => method === 'get_license_binding_status').length;
+  h.handlers.redeem_activation_code = (code, previewId) => {
+    assert.equal(code, 'CREDIT-CODE'); assert.equal(previewId, 'credits');
+    Object.assign(h.bindingStatus, {revision: 18, rebind_limit: 10, rebind_remaining: 8});
+    return structuredClone(h.snapshot);
+  };
+  await h.click('#licenseConfirmRedeem');
+  assert.equal(h.snapshot.valid_until, expiry);
+  assert.ok(h.calls.filter(([method]) => method === 'get_license_binding_status').length > before);
+  assert.equal(h.calls.some(([method]) => ['start_robot', 'connect_license_wechat', 'rebind_license_account'].includes(method)), false);
+  assert.match(h.element('#licenseFeedback').textContent, /微信换绑次数已入账，到期时间不变/);
+  assert.match(h.element('#licenseRebindSummary').title, /剩余可换绑 8 次/);
+}
+
 const completionTimer = setTimeout(() => {
   console.error('Subscription UI checks did not finish; a confirmation or API promise may be unresolved.');
   process.exitCode = 1;
@@ -1495,6 +1528,7 @@ const completionTimer = setTimeout(() => {
 
 (async () => {
   await activationAndRecovery();
+  await rebindCreditPreviewConfirmsBalanceWithoutStartingOrChangingExpiry();
   await expiryAndUnconfigured();
   await validSubscriptionStaysActiveWhenStoppedOrDisconnected();
   await revokedSubscriptionCanConfirmNewPaidActivationWithoutStarting();

@@ -19,7 +19,7 @@ from wechatrebot_manager.licensing.protocol import LicenseError
 from ..contact import CONTACT_FILENAME, clear_contact, parse_expiry
 from ..store import LicenseStore
 from .auth import AuthStore, COOKIE, PREFIX, SESSION_SECONDS
-from .codes import FILTERS, checked_reference, detail_html, history_html, migration_help, quota_text, reference_fields
+from .code_pages import CodePages
 from .github import GitHubError, GitHubReleases
 from .release_cache import ReleaseReadCache
 from .release_editor import ReleaseEditor, is_pending_version
@@ -29,8 +29,8 @@ _LOG = logging.getLogger(__name__)
 _TEMPLATES = Path(__file__).parent / "templates"
 
 
-def _field(name: str, label: str, *, kind: str = "text", required: bool = True, extra: str = "") -> str:
-    return (f'<label>{label}<input name="{name}" type="{kind}" maxlength="1024" '
+def _field(name: str, label: str, *, kind: str = "text", required: bool = True, extra: str = "", max_length: int = 1024) -> str:
+    return (f'<label>{label}<input name="{name}" type="{kind}" maxlength="{max_length}" '
             f'{"required" if required else ""} {extra}></label>')
 
 
@@ -230,75 +230,6 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
             raise web.HTTPNotFound()
         return web.Response(body=base64.b64decode(record["image_base64"]), content_type=record["mime_type"])
 
-    async def codes(request):
-        session = request["admin_session"]
-        if request.method == "POST":
-            form = request["admin_form"]
-            action = str(form.get("action", ""))
-            try:
-                if action == "issue":
-                    reference = checked_reference(form, session)
-                    try:
-                        days = int(str(form.get("valid_days", "")))
-                    except ValueError:
-                        days = 0
-                    if not 1 <= days <= 365:
-                        raise LicenseError("invalid_data", "兑换期限须为 1 至 365 天。")
-                    result = await asyncio.to_thread(store.issue_code, owner_ref=str(form.get("owner_ref", "")),
-                        reference=reference, now=int(clock()), mode=str(form.get("mode", "")),
-                        plan=str(form.get("plan", "")) or None, license_id=str(form.get("license_id", "")),
-                        target_device=str(form.get("device", "")), reset_account=form.get("reset_account") == "on",
-                        redeem_by=int(clock()) + days * 86400, actor="admin-web")
-                    return await redirect(request, "codes/" + result["code_id"], "激活码已生成，可复制交付客户。")
-                elif action == "revoke":
-                    result = await asyncio.to_thread(store.revoke, now=int(clock()),
-                        license_id=str(form.get("license_id", "")), code_id=str(form.get("code_id", "")), actor="admin-web")
-                    message = "已撤销：" + (result["license_id"] or result["code_id"])
-                elif action == "inspect":
-                    result = await asyncio.to_thread(store.inspect, license_id=str(form.get("license_id", "")), owner_ref=str(form.get("owner_ref", "")))
-                    licenses = result.get("licenses")
-                    quotas = "\n".join(f'{record["id"]}：{quota_text(record)}'
-                                       for record in licenses) if isinstance(licenses, list) else ""
-                    message = "查询结果（不包含明文激活码）：\n" + (quotas + "\n" if quotas else "") + json.dumps(result, ensure_ascii=False, indent=2)
-                else:
-                    raise LicenseError("invalid_data", "请选择有效操作。")
-            except LicenseError as exc:
-                message = str(exc)
-            return await redirect(request, "codes", message)
-        issue = ('<input type="hidden" name="action" value="issue"><label>用途<select name="mode">'
-                 '<option value="new">新开通</option><option value="renewal">续期</option><option value="recovery">补领</option>'
-                 '<option value="migration">迁移</option></select></label>'
-                 '<label>套餐<select name="plan"><option value="month">月卡</option><option value="year">年卡</option>'
-                 '<option value="trial">试用（仅新开通）</option><option value="">沿用原套餐（补领/迁移）</option></select></label>'
-                 + _field("owner_ref", "客户参考号", extra='placeholder="例如 KH0001，同一客户始终沿用"')
-                 + reference_fields(session, int(clock()))
-                 + _field("license_id", "原授权编号（续期/补领/迁移必填）", required=False)
-                 + _field("device", "新设备指纹（迁移必填）", required=False)
-                 + _field("valid_days", "激活码可兑换天数", kind="number", extra='value="30" min="1" max="365"')
-                 + '<label><input type="checkbox" name="reset_account">已核实换微信申请，清除原账号绑定（仅迁移）</label>'
-                 + '<button type="submit">生成激活码</button>')
-        revoke = ('<input type="hidden" name="action" value="revoke"><p class="hint">两个编号只填写一个。</p>'
-                  + _field("license_id", "授权编号", required=False) + _field("code_id", "未兑换的码编号", required=False)
-                  + '<button class="danger" type="submit">确认撤销</button>')
-        inspect = ('<input type="hidden" name="action" value="inspect">'
-                   + _field("license_id", "授权编号", required=False) + _field("owner_ref", "客户参考号", required=False)
-                   + '<button type="submit">查询状态</button>')
-        body = '<div class="grid"><section class="panel"><h2>人工发码</h2>' + migration_help() + _form(session, "codes", issue)
-        body += '</section><div><section class="panel"><h2>撤销</h2>' + _form(session, "codes", revoke)
-        body += '</section><section class="panel"><h2>查询</h2>' + _form(session, "codes", inspect) + '</section></div></div>'
-        filters = {key: request.query.get(key, "").strip() for key in (*FILTERS, "status")}
-        try:
-            page = int(request.query.get("page", "1"))
-        except ValueError:
-            raise LicenseError("invalid_data", "历史记录页码无效。")
-        history = await asyncio.to_thread(store.admin_code_history, now=int(clock()), page=page, **filters)
-        return await render(request, "激活码", body + history_html(history, filters) + f'<script src="{PREFIX}codes.js" defer></script>')
-
-    async def code_detail(request):
-        record = await asyncio.to_thread(store.admin_code_detail, request.match_info["code_id"], now=int(clock()))
-        await audit("code_history_view", record["id"])
-        return await render(request, "激活码详情", detail_html(record))
-
     async def release_page(request):
         session = request["admin_session"]
         if request.method == "POST":
@@ -416,6 +347,8 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     async def editor_script(request):
         return web.Response(text=(_TEMPLATES / "release-editor.js").read_text("utf-8"), content_type="application/javascript")
 
+    code_pages = CodePages(store, clock=clock, render=render, redirect=redirect, form=_form, field=_field, audit=audit)
+
     editor = ReleaseEditor(releases, auth, data_dir, clock=clock, audit=audit, render=render,
         redirect=redirect, form=_form, field=_field, release_reads=release_reads, transactions=transactions)
 
@@ -435,9 +368,10 @@ def create_admin_app(store: LicenseStore, data_dir: Path, *, clock=time.time,
     app.router.add_post("/releases/publish", editor.publish)
     app.router.add_get("/releases/status", release_status)
     app.router.add_post("/releases/refresh", release_status)
-    app.router.add_get("/codes/{code_id}", code_detail)
+    app.router.add_get("/codes/{code_id}", code_pages.code_detail)
+    app.router.add_get("/licenses/{license_id}", code_pages.license_detail)
     app.router.add_get("/contact/image", contact_image)
-    for path, handler in (("login", login), ("contact", contact), ("codes", codes), ("releases", release_page)):
+    for path, handler in (("login", login), ("contact", contact), ("codes", code_pages.show), ("releases", release_page)):
         app.router.add_get("/" + path, handler)
         app.router.add_post("/" + path, handler)
     app.router.add_post("/logout", logout)

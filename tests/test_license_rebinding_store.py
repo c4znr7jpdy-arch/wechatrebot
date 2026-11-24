@@ -166,7 +166,7 @@ def test_existing_database_adds_empty_history_without_changing_licenses(env):
     original = bound(env)
     with env.store.connection(write=True) as db:
         db.execute("DROP TABLE rebindings")
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
     env.store = LicenseStore(env.path)
     assert env.store.refresh(env.device, {"license_id": original["id"]}, env.now) == original
     assert status(env, original)["rebind_used"] == 0

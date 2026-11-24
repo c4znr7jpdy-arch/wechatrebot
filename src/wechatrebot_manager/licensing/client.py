@@ -38,7 +38,9 @@ _ERROR_MESSAGES = {
     "subscription_expired": "订阅已到期，请微信扫码入群领取续期码。",
     "account_bound": "授权已绑定其他微信账号，请在“订阅与授权”使用自助换绑。",
     "rebind_unavailable": "当前套餐不支持自助换绑微信账号。",
-    "rebind_exhausted": "当前套餐的换绑次数已用完。",
+    "rebind_exhausted": "微信换绑次数已用完，可联系管理员购买次数码。",
+    "paid_license_required": "次数码需要已有付费授权，请先兑换月卡或年卡。",
+    "license_ambiguous": "本机有多份授权，请先恢复要充值的授权，或联系管理员核实。",
     "binding_changed": "授权绑定或套餐已变化，请重新读取换绑次数并确认。",
     "account_unavailable": "此微信账号无法绑定当前授权，请联系管理员。",
     "active_license_conflict": "本机已有有效付费授权，请联系管理员处理，不能直接替换。",
@@ -413,6 +415,17 @@ class LicenseClient:
                     raise ValueError()
                 integer(data["valid_until"])
                 integer(data["expires_at"])
+                if "account" in data and (not isinstance(data["account"], str) or len(data["account"]) > 128):
+                    raise ValueError()
+                if "previous_valid_until" in data:
+                    integer(data["previous_valid_until"])
+                if data["mode"] == "rebind_credit":
+                    for name in ("rebind_credits", "rebind_before", "rebind_after"):
+                        integer(data[name])
+                    if (not data["license_id"] or data["plan"] == "trial" or data.get("replaces_license_id")
+                            or not 1 <= data["rebind_credits"] <= 1000
+                            or data["rebind_after"] != data["rebind_before"] + (0 if data["already_redeemed"] else data["rebind_credits"])):
+                        raise ValueError()
                 replaced = data.get("replaces_license_id", "")
                 if replaced and (data["mode"] != "migration" or not payload
                                  or replaced != payload["license_id"] or not data["license_id"]
@@ -429,6 +442,9 @@ class LicenseClient:
             result = {key: data[key] for key in (
                 "preview_id", "plan", "mode", "valid_until", "license_id", "already_redeemed", "expires_at",
             )} | {"message": str(data.get("message", ""))[:300], "replaces_license_id": replaced}
+            result.update({key: data[key] for key in (
+                "account", "previous_valid_until", "rebind_credits", "rebind_before", "rebind_after",
+            ) if key in data})
             if reactivating and not data["already_redeemed"]:
                 result["message"] = ("旧授权保持撤销；确认后新开通授权，从本次兑换起算，不继承旧授权的剩余时长。"
                                      "兑换后需重新绑定微信并手动恢复机器人。")
@@ -487,11 +503,13 @@ class LicenseClient:
                                     and old["valid_until"] <= payload["issued_at"])
         if (switching and not permitted_switch) or (account and payload["account"] != account):
             raise LicenseError("identity_mismatch", "返回的授权身份不匹配，请重新验证。")
-        if approved and approved["mode"] == "migration" and (
+        if approved and approved["mode"] in {"migration", "rebind_credit"} and (
             payload["license_id"] != approved["license_id"] or payload["plan"] != approved["plan"]
             or payload["valid_until"] != approved["valid_until"]
         ):
-            raise LicenseError("migration_mismatch", "迁入授权与已确认的预览不一致，请重新预览。")
+            if approved["mode"] == "migration":
+                raise LicenseError("migration_mismatch", "迁入授权与已确认的预览不一致，请重新预览。")
+            raise LicenseError("credit_mismatch", "次数充值后的授权与预览不一致，请重新验证。")
         if (not switching and payload["revision"] < state["revision"]) or payload["issued_at"] < state["issued_at"]:
             raise LicenseError("lease_rollback", "授权响应版本已过期，请重新验证。")
         if old and not switching and payload["revision"] == state["revision"]:

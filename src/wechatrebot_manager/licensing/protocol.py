@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 LEASE_DOMAIN = b"wechatrebot.license.v1\n"
 REQUEST_DOMAIN = b"wechatrebot.license.request.v1\n"
-CODE_MODES = frozenset({"new", "renewal", "recovery", "migration"})
+CODE_MODES = frozenset({"new", "renewal", "recovery", "migration", "rebind_credit"})
 PLANS = {
     "trial": {"name": "一小时试用", "price_fen": 0, "months": 0, "seconds": 3600},
     "month": {"name": "月付", "price_fen": 6900, "months": 1, "seconds": 0},

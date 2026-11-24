@@ -227,7 +227,7 @@
         unactivated: "当前未授权。请激活免费试用或兑换付费激活码，再启动机器人。",
         configuration_pending: "授权服务尚未配置。请联系管理员完成配置后重新读取授权状态。",
         expired: plan === "trial" ? "免费试用已结束，当前未授权。请联系管理员购买付费激活码后兑换。"
-          : "订阅已到期，机器人未运行。请兑换续期码，续期后点击“启动机器人”。",
+          : "订阅已到期，机器人未运行。请兑换新的时长激活码，续费后点击“启动机器人”。",
         revoked: "授权已撤销，当前未授权。请联系管理员或兑换新的付费激活码。",
         suspended: "授权暂不可用，机器人未运行。请联系管理员处理后重新验证。",
         license_unavailable: "当前设备授权不可用，机器人未运行。请联系管理员恢复或迁移授权。",
@@ -420,9 +420,9 @@
       $("#homeLicenseTitle").textContent = state.readError ? "授权状态暂时无法读取" : expiring ? "授权即将到期"
         : offline && hasValidAuthorization() ? "当前使用离线授权" : description()[0];
       $("#homeLicenseMessage").textContent = state.readError || (expiring
-        ? `有效期至 ${data.expires_text || expiryText(data.valid_until)}，可在“订阅与授权”兑换续期码。`
+        ? `有效期至 ${data.expires_text || expiryText(data.valid_until)}，可在“订阅与授权”兑换新的时长激活码。`
         : statusMessage());
-      $("#homeLicenseAction").textContent = ["expired", "subscription_expired"].includes(data.state) ? "兑换续期码" : "查看授权";
+      $("#homeLicenseAction").textContent = ["expired", "subscription_expired"].includes(data.state) ? "兑换激活码" : "查看授权";
       $("#homeLicenseAction").disabled = false;
     }
 
@@ -495,10 +495,9 @@
         $("#licenseOptions").open = !authorized;
         state.authorizedView = authorized;
       }
-      $("#licenseOptionsTitle").textContent = authorized ? "续期或更换套餐" : "激活授权";
+      $("#licenseOptionsTitle").textContent = authorized ? "续费或增加换绑次数" : "激活授权";
       $("#licensePausedInfo").hidden = !data.enabled || !pausedStates.has(data.state);
-      $("#licenseRedeemTitle").textContent = data.license_id && !["revoked", "license_revoked"].includes(data.state)
-        ? "兑换续期码" : "兑换激活码";
+      $("#licenseRedeemTitle").textContent = "兑换激活码";
       $("#licenseCodeHelp").textContent = !data.enabled ? "商业授权尚未启用，暂不接受激活码。" : !data.configured
         ? "授权服务尚未配置，暂时无法兑换激活码。" : "请复制发码详情中的完整激活码，业务编号不能用于兑换。先查看套餐和有效期，确认后再兑换。";
       renderPlans(); renderFreeTrialStatus(); renderControls(); renderHome();
@@ -576,8 +575,14 @@
         const data = await transact(() => api("preview_activation_code", code));
         if (!data?.preview_id) throw new Error("激活码预览未完成，请重新查看。");
         state.preview = {code, data};
-        const mode = data.already_redeemed ? "恢复已有授权" : ({new: "新开通", activation: "新开通", renewal: "续期", recovery: "补领授权", migration: "迁移到本机"}[data.mode] || "开通授权");
-        const rows = [["套餐", planName(data.plan)], ["操作", mode], ["兑换后到期", expiryText(data.valid_until)]];
+        const topup = data.mode === "rebind_credit";
+        const mode = data.already_redeemed ? (topup ? "次数码已兑换" : "恢复已有授权")
+          : ({new: "新开通", activation: "新开通", renewal: "续费", recovery: "恢复授权", migration: "迁移到本机", rebind_credit: "增加微信换绑次数"}[data.mode] || "开通授权");
+        const rows = [["套餐", planName(data.plan)], ["操作", mode]];
+        if (data.account) rows.push(["绑定微信", data.account]);
+        if (topup) rows.push(["微信换绑次数", `${data.rebind_before} 次 → ${data.rebind_after} 次`]);
+        else if (data.previous_valid_until && !data.already_redeemed && data.mode === "renewal") rows.push(["原到期时间", expiryText(data.previous_valid_until)]);
+        rows.push([topup ? "到期时间（不变）" : "兑换后到期", expiryText(data.valid_until)]);
         if (data.replaces_license_id) rows.push([data.already_redeemed ? "已停用授权" : "将停用授权", data.replaces_license_id], ["迁入授权", data.license_id]);
         $("#licenseCodePreviewDetails").innerHTML = rows.map(([name, value]) => `<div><dt>${esc(name)}</dt><dd>${esc(value)}</dd></div>`).join("");
         const replacement = !data.replaces_license_id ? "" : data.already_redeemed
@@ -586,7 +591,8 @@
         const defaultMessage = data.already_redeemed ? "本次仅恢复已兑换授权，不重复增加有效期。"
           : data.plan === "trial" ? "试用从确认兑换成功开始，连续计时 1 小时。" : "请核对套餐与有效期，确认后兑换到当前设备。";
         $("#licenseCodePreviewMessage").textContent = [data.message || defaultMessage, replacement].filter(Boolean).join(" ");
-        $("#licenseConfirmRedeem").textContent = data.already_redeemed ? "确认恢复授权" : data.mode === "migration" ? "确认迁移" : "确认兑换";
+        $("#licenseConfirmRedeem").textContent = topup ? (data.already_redeemed ? "确认充值记录" : "确认增加次数")
+          : data.already_redeemed ? "确认恢复授权" : data.mode === "migration" ? "确认迁移" : "确认兑换";
         $("#licenseCodePreview").hidden = false;
         renderControls(); $("#licenseConfirmRedeem").focus();
       } catch (error) { showError(error, true); }
@@ -602,7 +608,8 @@
           $("#licenseCode").value = "";
           clearPreview(); feedback("", "neutral", true);
           return result;
-        }, "订阅已生效。请在运行中心点击“启动”；首次启动时先确认绑定提示，再登录微信。");
+        }, preview.data.mode === "rebind_credit" ? "微信换绑次数已入账，到期时间不变。" : "订阅已生效。请在运行中心点击“启动”；首次启动时先确认绑定提示，再登录微信。");
+        if (preview.data.mode === "rebind_credit") await loadBindingStatus({force: true});
       } catch (error) { showError(error, true); }
     }
 

@@ -66,7 +66,7 @@ def test_year_grants_ten_migrations_including_same_device_account_reset(env):
         assert env.store.migration_quota(original["id"]) == quota(10, used - 1)
         assert redeem(env, code)["id"] == original["id"]
         assert env.store.migration_quota(original["id"]) == quota(10, used)
-    with pytest.raises(LicenseError, match="换绑次数已用完"):
+    with pytest.raises(LicenseError, match="换电脑次数已用完"):
         migration(env, original["id"])
 
 
@@ -180,11 +180,11 @@ def test_legacy_redemptions_are_recounted_without_encrypted_history_or_schema_ch
     assert env.store.migration_quota(license_id) == quota(11, 1)
     assert not env.store.admin_code_detail(env.store.inspect(license_id=license_id)["codes"][0]["id"], now=env.now)["history_available"]
     with env.store.connection() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
     for _ in range(12):
         legacy_redemption(env, license_id)
     assert env.store.migration_quota(license_id) == quota(11, 13)
-    with pytest.raises(LicenseError, match="换绑次数已用完"):
+    with pytest.raises(LicenseError, match="换电脑次数已用完"):
         migration(env, license_id)
     # Historical excess is kept in used, but cannot consume new paid credits.
     renewal = issue(env, plan="month", mode="renewal", license_id=license_id)
