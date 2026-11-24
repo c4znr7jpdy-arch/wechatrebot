@@ -327,13 +327,18 @@ def test_backup_restores_encrypted_code_history_with_its_private_key(tmp_path):
 
 
 @pytest.mark.parametrize("damage", ["missing", "short"])
-def test_encrypted_history_without_usable_key_is_never_labeled_complete(tmp_path, damage):
+@pytest.mark.parametrize("content", ["code", "note"])
+def test_encrypted_history_without_usable_key_is_never_labeled_complete(tmp_path, damage, content):
     from services.activation_service.store import LicenseStore
 
     data, root = tmp_path / "encrypted-data", tmp_path / "backups"
     store = LicenseStore(data / backup.DATABASE)
     (data / backup.PRIVATE_KEY).write_bytes(SECRET)
-    store.issue_code(owner_ref="backup-customer", reference="backup-record", now=1000, plan="month")
+    if content == "code":
+        store.issue_code(owner_ref="backup-customer", reference="backup-record", now=1000, plan="month")
+    else:
+        record = store.claim_trial("a" * 64, "test-public-key", {"account": "wxid_backup", "machine_id": "b" * 64}, 1000)
+        store.admin_update_note(now=1000, license_id=record["id"], note="backup customer")
     if damage == "missing":
         (data / backup.HISTORY_KEY).unlink()
     else:

@@ -21,11 +21,13 @@ from zoneinfo import ZoneInfo
 from wechatrebot_manager.licensing.protocol import (
     ACCOUNT_PATTERN, CODE_MODES, MAX_LEASE_SECONDS, PLANS, LicenseError, extend_period,
 )
-from .code_history import KEY_FILENAME, decrypt_payload, encrypt_payload, load_key
+from .code_history import encrypt_payload
+from .records import RecordsMixin
 from .rebinding import REBINDING_SCHEMA, RebindingMixin
 
 PREVIEW_SECONDS = 300
 MIGRATION_CREDITS = {"month": 1, "year": 10}
+CARD_MODES = frozenset({"duration", "rebind_credit"})
 _CODE = re.compile(r"WRB[A-Z2-7]{32}")
 _FINGERPRINT = re.compile(r"[a-f0-9]{64}")
 
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS licenses (
     account_hash TEXT NOT NULL DEFAULT '', plan TEXT NOT NULL,
     valid_until INTEGER NOT NULL, anchor_day INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'active', revision INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL, encrypted_note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS licenses_owner ON licenses(owner_hash);
 CREATE INDEX IF NOT EXISTS licenses_account ON licenses(account_hash);
@@ -49,7 +51,7 @@ CREATE TABLE IF NOT EXISTS codes (
     issued_at INTEGER NOT NULL, redeem_by INTEGER NOT NULL,
     revoked_at INTEGER, redeemed_at INTEGER,
     redeemed_license TEXT, redeemed_device TEXT, redeemed_replaces_id TEXT,
-    encrypted_payload TEXT NOT NULL DEFAULT '',
+    encrypted_payload TEXT NOT NULL DEFAULT '', rebind_credits INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(target_id) REFERENCES licenses(id),
     FOREIGN KEY(redeemed_license) REFERENCES licenses(id),
     FOREIGN KEY(redeemed_replaces_id) REFERENCES licenses(id)
@@ -92,11 +94,11 @@ CREATE TABLE IF NOT EXISTS audit (
 _MIGRATION_LEDGER = """
 WITH migration_events AS (
     SELECT c.id,c.redeemed_at,c.redeemed_license AS license_id,
-           CASE WHEN c.mode IN ('new','renewal') THEN credits.amount ELSE -1 END AS delta
+           CASE WHEN c.mode IN ('new','renewal','duration') THEN credits.amount ELSE -1 END AS delta
     FROM codes c JOIN (
 """ + " UNION ALL ".join(f"SELECT '{plan}' AS plan,{amount} AS amount" for plan, amount in MIGRATION_CREDITS.items()) + """
     ) credits ON credits.plan=c.plan
-    WHERE c.redeemed_at IS NOT NULL AND c.mode IN ('new','renewal','migration')
+    WHERE c.redeemed_at IS NOT NULL AND c.mode IN ('new','renewal','duration','migration')
 ), migration_balances AS (
     SELECT license_id,delta,SUM(delta) OVER (
         PARTITION BY license_id ORDER BY redeemed_at,CASE WHEN delta>0 THEN 0 ELSE 1 END,id
@@ -117,9 +119,10 @@ FROM licenses l LEFT JOIN (
 """ + _MIGRATION_LEDGER + ") q ON q.license_id=l.id"
 
 _HISTORY_SELECT = """
-SELECT c.id,c.owner_hash,c.reference_hash,c.encrypted_payload,c.plan,c.mode,c.target_id,
+SELECT c.id,c.digest,c.owner_hash,c.reference_hash,c.encrypted_payload,c.plan,c.mode,c.target_id,c.rebind_credits,
        c.target_device,c.reset_account,c.issued_at,c.redeem_by,c.revoked_at,c.redeemed_at,
-       c.redeemed_license,l.status AS linked_status,l.valid_until,l.account,l.device,l.plan AS license_plan,
+       c.redeemed_license,c.redeemed_device,l.status AS linked_status,l.valid_until,l.account,l.device,l.plan AS license_plan,
+       l.encrypted_note AS license_note,
        l.migration_total,l.migration_used,l.migration_remaining,
        CASE WHEN c.redeemed_at IS NOT NULL THEN 'redeemed'
             WHEN c.revoked_at IS NOT NULL THEN 'revoked'
@@ -155,7 +158,7 @@ def _validate_body(body: dict, required: set[str], optional: set[str] | None = N
         raise LicenseError("invalid_data", "请求参数无效。")
 
 
-class LicenseStore(RebindingMixin):
+class LicenseStore(RecordsMixin, RebindingMixin):
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +166,7 @@ class LicenseStore(RebindingMixin):
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2, 3}:
+            if version not in {0, 1, 2, 3, 4}:
                 raise ValueError("Unsupported activation database schema")
             if version == 1:
                 db.execute("ALTER TABLE codes ADD COLUMN redeemed_replaces_id TEXT REFERENCES licenses(id)")
@@ -176,7 +179,14 @@ class LicenseStore(RebindingMixin):
                     db.execute(statement)
             if "encrypted_payload" not in {row[1] for row in db.execute("PRAGMA table_info(codes)")}:
                 db.execute("ALTER TABLE codes ADD COLUMN encrypted_payload TEXT NOT NULL DEFAULT ''")
-            db.execute("PRAGMA user_version=3")
+            for table, name, definition in (
+                ("codes", "rebind_credits", "INTEGER NOT NULL DEFAULT 0"),
+                ("licenses", "encrypted_note", "TEXT NOT NULL DEFAULT ''"),
+                ("rebindings", "extra_used", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            db.execute("PRAGMA user_version=4")
             db.execute("COMMIT")
 
     @contextmanager
@@ -223,7 +233,7 @@ class LicenseStore(RebindingMixin):
     @classmethod
     def _require_migration_quota(cls, db, target) -> None:
         if target["plan"] in MIGRATION_CREDITS and cls._migration_quota(db, target["id"])["migration_remaining"] <= 0:
-            raise LicenseError("code_unavailable", "换绑次数已用完，请续费增加次数后再办理迁移。")
+            raise LicenseError("code_unavailable", "换电脑次数已用完，请续费增加换电脑次数后再办理迁移。")
 
     def migration_quota(self, license_id: str) -> dict[str, int]:
         with self.connection() as db:
@@ -386,23 +396,32 @@ class LicenseStore(RebindingMixin):
             return allowed
 
     def issue_code(
-        self, *, owner_ref: str, reference: str, now: int, plan: str | None = None,
+        self, *, owner_ref: str = "", reference: str, now: int, plan: str | None = None,
         mode: str = "new", license_id: str = "", target_device: str = "",
         reset_account: bool = False, redeem_by: int | None = None, actor: str = "admin",
+        rebind_credits: int = 0, note: str = "",
     ) -> dict:
-        owner_hash = _owner(owner_ref)
         reference_hash = _hash(_text(reference))
         redeem_by = now + 30 * 86400 if redeem_by is None else redeem_by
-        if mode not in CODE_MODES or type(redeem_by) is not int or redeem_by <= now:
+        if mode not in CODE_MODES | CARD_MODES or type(redeem_by) is not int or redeem_by <= now:
             raise LicenseError("invalid_data", "激活码用途或兑换期限无效。")
+        if (type(rebind_credits) is not int or (not 1 <= rebind_credits <= 1000 if mode == "rebind_credit" else rebind_credits != 0)
+                or not isinstance(note, str) or len(note) > 256):
+            raise LicenseError("invalid_data", "换绑次数须为 1 至 1000 的整数，备注最多 256 字。")
         if target_device and not _FINGERPRINT.fullmatch(target_device):
             raise LicenseError("invalid_data", "目标设备指纹无效。")
         with self.connection(write=True) as db:
+            if not owner_ref and (mode in CARD_MODES or mode in {"migration", "recovery"}):
+                existing = self._license(db, _text(license_id)) if mode not in CARD_MODES else None
+                owner_ref = "auto:" + secrets.token_hex(16)
+                owner_hash = existing["owner_hash"] if existing else _owner(owner_ref)
+            else:
+                owner_hash = _owner(owner_ref)
             target = self._issuance_target(
                 db, mode, owner_hash, license_id, target_device, reset_account,
             )
-            plan = plan or (target["plan"] if target else "")
-            if plan not in PLANS or (mode == "renewal" and plan == "trial"):
+            plan = "month" if mode == "rebind_credit" else plan or (target["plan"] if target else "")
+            if plan not in PLANS or (mode in {"renewal", "duration"} and plan == "trial"):
                 raise LicenseError("invalid_data", "请选择有效套餐，试用不能用于续期。")
             if mode in {"recovery", "migration"} and plan != target["plan"]:
                 raise LicenseError("invalid_data", "补领或迁移不能修改原套餐。")
@@ -415,15 +434,15 @@ class LicenseStore(RebindingMixin):
             code_id = secrets.token_hex(16)
             key = self._history_key(db, create=True)
             encrypted = encrypt_payload(key, code_id, code=code, owner_ref=_text(owner_ref),
-                                        reference=_text(reference))
+                                        reference=_text(reference), note=note.strip())
             db.execute(
                 "INSERT INTO codes(id,digest,reference_hash,owner_hash,plan,mode,target_id,"
-                "target_device,target_revision,reset_account,issued_at,redeem_by,encrypted_payload) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "target_device,target_revision,reset_account,issued_at,redeem_by,encrypted_payload,rebind_credits) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (code_id, code_digest(code), reference_hash, owner_hash, plan, mode,
                  license_id or None, target_device,
                  target["revision"] if mode == "migration" else None,
-                 int(reset_account), now, redeem_by, encrypted),
+                 int(reset_account), now, redeem_by, encrypted, rebind_credits),
             )
             self._audit(db, now, actor, "issue_code", code_id, mode=mode, plan=plan,
                         license_id=license_id, target_device=target_device)
@@ -432,7 +451,7 @@ class LicenseStore(RebindingMixin):
 
     @classmethod
     def _issuance_target(cls, db, mode, owner_hash, license_id, target_device, reset_account):
-        if mode == "new":
+        if mode == "new" or mode in CARD_MODES:
             if license_id or target_device or reset_account:
                 raise LicenseError("invalid_data", "新开通码不能指定已有授权或迁移参数。")
             return None
@@ -449,19 +468,45 @@ class LicenseStore(RebindingMixin):
         return target
 
     @classmethod
-    def _code_context(cls, db, digest: str, device: str, now: int):
+    def _card_context(cls, db, code: dict, device: str, supplied_id: str, now: int):
+        if supplied_id:
+            target = cls._owned(db, supplied_id, device)
+            cls._active(target)
+        else:
+            candidates = db.execute("SELECT * FROM licenses WHERE device=? AND status='active'", (device,)).fetchall()
+            if len(candidates) > 1:
+                raise LicenseError("license_ambiguous", "本机有多份授权，请先恢复要充值的授权，或联系管理员核实。")
+            target = candidates[0] if candidates else None
+            if target is None and db.execute("SELECT 1 FROM licenses WHERE device=?", (device,)).fetchone():
+                raise LicenseError("license_revoked", "本机原授权已停用，请联系管理员核实。")
+        mode = code["mode"]
+        if mode == "rebind_credit" and (target is None or target["plan"] == "trial"):
+            raise LicenseError("paid_license_required", "次数码需要已有付费授权，请先兑换月卡或年卡。")
+        if mode == "duration" and target and target["account_hash"]:
+            cls._account_available(db, target["account_hash"], target["id"], now)
+        return {**code, "source_mode": mode,
+                "mode": ("renewal" if target else "new") if mode == "duration" else mode,
+                "plan": target["plan"] if mode == "rebind_credit" else code["plan"]}, target, False
+
+    @classmethod
+    def _code_context(cls, db, digest: str, device: str, now: int, supplied_id: str = ""):
         code = db.execute("SELECT * FROM codes WHERE digest=?", (digest,)).fetchone()
         unavailable = LicenseError("code_unavailable", "激活码无效或不适用于当前设备。")
         if code is None or code["revoked_at"] is not None:
             raise unavailable
+        code = dict(code)
         if code["redeemed_at"] is not None:
             record = cls._license(db, code["redeemed_license"])
             if code["redeemed_device"] != device or record["device"] != device:
                 raise unavailable
             cls._active(record)
+            if code["mode"] == "duration":
+                code = {**code, "source_mode": "duration", "mode": "renewal" if code["target_id"] else "new"}
             return code, record, True
         if code["redeem_by"] <= now:
             raise LicenseError("code_expired", "激活码已超过兑换期限，请联系管理员。")
+        if code["mode"] in CARD_MODES:
+            return cls._card_context(db, code, device, supplied_id, now)
         target = cls._license(db, code["target_id"]) if code["target_id"] else None
         if target:
             expected = code["target_device"] if code["mode"] == "migration" else target["device"]
@@ -502,7 +547,7 @@ class LicenseStore(RebindingMixin):
 
     @staticmethod
     def _projected_until(code, target, already_redeemed: bool, now: int) -> int:
-        if already_redeemed or code["mode"] in {"recovery", "migration"}:
+        if already_redeemed or code["mode"] in {"recovery", "migration", "rebind_credit"}:
             return target["valid_until"]
         if code["mode"] == "renewal" and target["valid_until"] > now:
             anchor = None if target["plan"] == "trial" else target["anchor_day"]
@@ -517,7 +562,7 @@ class LicenseStore(RebindingMixin):
         supplied_id = _text(supplied_id) if supplied_id else ""
         digest = code_digest(body["code"])
         with self.connection(write=True) as db:
-            code, target, redeemed = self._code_context(db, digest, device, now)
+            code, target, redeemed = self._code_context(db, digest, device, now, supplied_id)
             self._new_trial_machine(db, code, redeemed, body)
             replaced = self._replacement(db, code, target, device, supplied_id, now, redeemed=redeemed)
             preview_id = secrets.token_hex(16)
@@ -534,23 +579,36 @@ class LicenseStore(RebindingMixin):
                 message = "确认后将停用本机原试用或已到期授权，迁入原授权，到期时间不变。"
             if not redeemed and code["mode"] == "migration" and target["plan"] in MIGRATION_CREDITS:
                 remaining = self._migration_quota(db, target["id"])["migration_remaining"]
-                message += f"本次迁移成功后扣除 1 次换绑次数，当前剩余 {remaining} 次；发码和预览不扣次数。"
-            return {
+                message += f"本次迁移成功后扣除 1 次换电脑次数，当前剩余 {remaining} 次；发码和预览不扣次数。"
+            result = {
                 "preview_id": preview_id, "expires_at": now + PREVIEW_SECONDS,
                 "plan": target["plan"] if redeemed else code["plan"], "mode": code["mode"],
                 "valid_until": self._projected_until(code, target, redeemed, now),
                 "license_id": target["id"] if target else "", "already_redeemed": redeemed,
                 "replaces_license_id": replaced["id"] if replaced else "", "message": message,
             }
+            if target:
+                result.update(account=target["account"], previous_valid_until=target["valid_until"])
+            if code["mode"] == "rebind_credit":
+                before = self._binding_status(db, target, now)["rebind_remaining"]
+                result.update(rebind_credits=code["rebind_credits"], rebind_before=before,
+                              rebind_after=before + (0 if redeemed else code["rebind_credits"]))
+                result["message"] = ("该次数码已兑换，不重复增加次数。" if redeemed else
+                    f'微信换绑次数增加 {code["rebind_credits"]} 次，套餐和到期时间不变。')
+                if target["valid_until"] <= now:
+                    result["message"] += "授权已到期，次数会保留，续费后才可换绑。"
+            return result
 
     def redeem(self, device: str, public_key: str, body: dict, now: int) -> dict:
         _validate_body(body, {"code", "preview_id"}, {"machine_id"})
         preview_id = _text(body["preview_id"])
         digest = code_digest(body["code"])
         with self.connection(write=True) as db:
-            code, target, redeemed = self._code_context(db, digest, device, now)
-            machine_hash = self._new_trial_machine(db, code, redeemed, body)
             preview = db.execute("SELECT * FROM previews WHERE id=?", (preview_id,)).fetchone()
+            if not preview or preview["device"] != device:
+                raise LicenseError("preview_required", "请先预览激活码并确认兑换内容。")
+            code, target, redeemed = self._code_context(db, digest, device, now, preview["license_id"])
+            machine_hash = self._new_trial_machine(db, code, redeemed, body)
             if not preview or preview["device"] != device or preview["code_id"] != code["id"]:
                 raise LicenseError("preview_required", "请先预览激活码并确认兑换内容。")
             replaced = self._replacement(
@@ -569,6 +627,10 @@ class LicenseStore(RebindingMixin):
                 self._audit(db, now, device, "replace_license", replaced["id"],
                             migrated_license_id=target_id, code_id=code["id"])
             license_id = self._apply_grant(db, code, target, device, public_key, now)
+            if code.get("source_mode") in CARD_MODES:
+                owner_hash = self._license(db, license_id)["owner_hash"]
+                db.execute("UPDATE codes SET owner_hash=?,target_id=? WHERE id=?",
+                           (owner_hash, target["id"] if target else None, code["id"]))
             if machine_hash:
                 self._remember_trial(db, "machine", machine_hash, license_id)
             db.execute(
@@ -609,12 +671,16 @@ class LicenseStore(RebindingMixin):
                     (code["plan"], until, anchor, license_id),
                 )
             elif mode == "migration":
+                if code["reset_account"] and target["account"] and target["plan"] != "trial":
+                    cls._record_rebinding(db, target, "", device, now)
                 account = "" if code["reset_account"] else target["account"]
                 account_hash = "" if code["reset_account"] else target["account_hash"]
                 db.execute(
                     "UPDATE licenses SET device=?,public_key=?,account=?,account_hash=?,revision=revision+1 WHERE id=?",
                     (device, public_key, account, account_hash, license_id),
                 )
+            elif mode == "rebind_credit":
+                db.execute("UPDATE licenses SET revision=revision+1 WHERE id=?", (license_id,))
         if code["plan"] == "trial":
             cls._remember_trial(db, "owner", code["owner_hash"], license_id)
             cls._remember_trial(db, "device", device, license_id)
@@ -673,104 +739,6 @@ class LicenseStore(RebindingMixin):
                     self._audit(db, now, actor, "revoke_code", code_id)
         return {"license_id": license_id, "code_id": code_id, "status": "revoked"}
 
-    def inspect(self, *, license_id: str = "", owner_ref: str = "") -> dict:
-        with self.connection() as db:
-            if license_id:
-                record = db.execute(_LICENSE_QUOTA_SELECT + " WHERE l.id=?", (license_id,)).fetchone()
-                if record is None:
-                    raise LicenseError("license_unavailable", "当前设备没有可用的该项授权。")
-                licenses = [dict(record)]
-                owner_hash = licenses[0]["owner_hash"]
-            elif owner_ref:
-                owner_hash = _owner(owner_ref)
-                licenses = [dict(row) for row in db.execute(_LICENSE_QUOTA_SELECT + " WHERE l.owner_hash=?", (owner_hash,))]
-            else:
-                return {"licenses": db.execute("SELECT COUNT(*) FROM licenses").fetchone()[0],
-                        "codes": db.execute("SELECT COUNT(*) FROM codes").fetchone()[0]}
-            for record in licenses:
-                record.pop("public_key")
-                record.pop("owner_hash")
-                record.pop("account_hash")
-            codes = [dict(row) for row in db.execute(
-                "SELECT id,plan,mode,target_id,issued_at,redeem_by,revoked_at,redeemed_at,redeemed_license,redeemed_replaces_id "
-                "FROM codes WHERE owner_hash=? ORDER BY issued_at DESC", (owner_hash,),
-            )]
-            return {"licenses": licenses, "codes": codes}
-
-    def admin_counts(self) -> dict[str, int]:
-        with self.connection() as db:
-            return {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-                    for name in ("licenses", "codes", "trials")}
-
-    def _history_key(self, db, *, create: bool = False) -> bytes:
-        existing = db.execute("SELECT id,encrypted_payload FROM codes WHERE encrypted_payload<>'' LIMIT 1").fetchone()
-        key = load_key(self.path.parent / KEY_FILENAME, create=create and existing is None)
-        if existing is not None:
-            # Detect a replaced key before accepting new history under a different key.
-            decrypt_payload(key, existing["id"], existing["encrypted_payload"])
-        return key
-
-    @staticmethod
-    def _admin_history_item(row, key: bytes | None, now: int, *, include_code: bool = False) -> dict:
-        item = dict(row)
-        payload = item.pop("encrypted_payload")
-        item.pop("owner_hash")
-        item.pop("reference_hash")
-        linked_status = item.pop("linked_status")
-        item["license_status"] = ("" if linked_status is None else "revoked" if linked_status == "revoked"
-                                  else "expired" if item["valid_until"] <= now else "active")
-        item["history_available"] = bool(payload)
-        saved = decrypt_payload(key, item["id"], payload) if payload else {"code": "", "owner_ref": "", "reference": ""}
-        item.update(saved)
-        item["reset_account"] = bool(item["reset_account"])
-        for name in ("account", "device", "license_plan"):
-            item[name] = item[name] or ""
-        if not include_code:
-            item.pop("code")
-        return item
-
-    def admin_code_history(
-        self, *, now: int, owner_ref: str = "", reference: str = "", license_id: str = "",
-        code_id: str = "", status: str = "", page: int = 1, page_size: int = 20,
-    ) -> dict:
-        if (type(now) is not int or type(page) is not int or page < 1 or type(page_size) is not int
-                or not 1 <= page_size <= 100 or not isinstance(status, str)
-                or status not in {"", "unredeemed", "redeemed", "expired", "revoked"}):
-            raise LicenseError("invalid_data", "历史查询条件或分页参数无效。")
-        if (page - 1) * page_size > 2**63 - 1:
-            raise LicenseError("invalid_data", "历史查询页码超出范围。")
-        conditions, parameters = [], [now]
-        for value, column, convert in ((owner_ref, "owner_hash", _owner), (reference, "reference_hash", lambda x: _hash(_text(x))),
-                                       (code_id, "id", _text), (status, "status", _text)):
-            if value != "":
-                conditions.append(f"{column}=?")
-                parameters.append(convert(value))
-        if license_id != "":
-            conditions.append("(target_id=? OR redeemed_license=?)")
-            parameters.extend([_text(license_id)] * 2)
-        query = " FROM (" + _HISTORY_SELECT + ") WHERE " + (" AND ".join(conditions) or "1=1")
-        with self.connection() as db:
-            db.execute("BEGIN")
-            total = db.execute("SELECT COUNT(*)" + query, parameters).fetchone()[0]
-            rows = db.execute("SELECT *" + query + " ORDER BY issued_at DESC,id DESC LIMIT ? OFFSET ?",
-                              [*parameters, page_size, (page - 1) * page_size]).fetchall()
-            key = self._history_key(db) if any(row["encrypted_payload"] for row in rows) else None
-            items = [self._admin_history_item(row, key, now) for row in rows]
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
-
-    def admin_code_detail(self, code_id: str, *, now: int) -> dict:
-        if type(now) is not int:
-            raise LicenseError("invalid_data", "历史查询参数无效。")
-        with self.connection() as db:
-            row = db.execute("SELECT * FROM (" + _HISTORY_SELECT + ") WHERE id=?", (now, _text(code_id))).fetchone()
-            if row is None:
-                raise LicenseError("code_unavailable", "码编号不存在，请核对历史记录。")
-            key = self._history_key(db) if row["encrypted_payload"] else None
-            return self._admin_history_item(row, key, now, include_code=True)
-
-    def admin_audit(self, now: int, event: str, object_id: str = "", **details) -> None:
-        with self.connection(write=True) as db:
-            self._audit(db, now, "admin-web", event, object_id, **details)
 
 
 def lease_payload(record: dict, request_nonce: str, now: int) -> dict:

@@ -159,9 +159,11 @@ def _snapshot_database(source: Path, target: Path) -> None:
 
 def _history_key_required(database: Path) -> bool:
     with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
-        if "encrypted_payload" not in {row[1] for row in db.execute("PRAGMA table_info(codes)")}:
-            return False
-        return db.execute("SELECT 1 FROM codes WHERE encrypted_payload<>'' LIMIT 1").fetchone() is not None
+        for table, column in (("codes", "encrypted_payload"), ("licenses", "encrypted_note")):
+            if column in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+                if db.execute(f"SELECT 1 FROM {table} WHERE {column}<>'' LIMIT 1").fetchone() is not None:
+                    return True
+        return False
 
 
 def _complete_files(root: Path, path: Path) -> set[str] | None:

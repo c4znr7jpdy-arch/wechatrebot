@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS rebindings (
     id INTEGER PRIMARY KEY, license_id TEXT NOT NULL, device TEXT NOT NULL,
     old_account_hash TEXT NOT NULL, new_account_hash TEXT NOT NULL,
     previous_revision INTEGER NOT NULL, revision INTEGER NOT NULL,
-    happened_at INTEGER NOT NULL,
+    happened_at INTEGER NOT NULL, extra_used INTEGER NOT NULL DEFAULT 0,
     UNIQUE(license_id, revision), FOREIGN KEY(license_id) REFERENCES licenses(id)
 );
 CREATE INDEX IF NOT EXISTS rebindings_license ON rebindings(license_id);
@@ -21,11 +21,25 @@ CREATE INDEX IF NOT EXISTS rebindings_license ON rebindings(license_id);
 
 class RebindingMixin:
     @staticmethod
-    def _binding_status(db, record, now: int) -> dict:
-        used = db.execute(
-            "SELECT COUNT(*) FROM rebindings WHERE license_id=?", (record["id"],),
+    def _rebind_budget(db, record) -> dict:
+        used, extra_used = db.execute(
+            "SELECT COUNT(*),COALESCE(SUM(extra_used),0) FROM rebindings WHERE license_id=?", (record["id"],),
+        ).fetchone()
+        extra = db.execute(
+            "SELECT COALESCE(SUM(rebind_credits),0) FROM codes "
+            "WHERE mode='rebind_credit' AND redeemed_at IS NOT NULL AND redeemed_license=?", (record["id"],),
         ).fetchone()[0]
-        limit = REBIND_LIMITS.get(record["plan"], 0)
+        base = REBIND_LIMITS.get(record["plan"], 0)
+        base_used = used - extra_used
+        # Historical use above a downgraded plan is not debt against a new top-up.
+        # Keep the legacy limit untouched for licenses without purchased credits.
+        limit = (max(base, base_used) + extra) if extra else base
+        return {"used": used, "limit": limit, "extra_next": base_used >= base}
+
+    @classmethod
+    def _binding_status(cls, db, record, now: int) -> dict:
+        budget = cls._rebind_budget(db, record)
+        used, limit = budget["used"], budget["limit"]
         remaining = max(0, limit - used)
         return {
             "license_id": record["id"], "account": record["account"],
@@ -34,6 +48,20 @@ class RebindingMixin:
             "can_rebind": bool(record["status"] == "active" and record["valid_until"] > now
                                and record["account"] and remaining),
         }
+
+    @classmethod
+    def _record_rebinding(cls, db, record, new_account_hash: str, device: str, now: int) -> None:
+        if record["valid_until"] <= now:
+            raise LicenseError("subscription_expired", "订阅已到期，请续费后再换绑微信。")
+        budget = cls._rebind_budget(db, record)
+        if budget["used"] >= budget["limit"]:
+            raise LicenseError("rebind_exhausted", "微信换绑次数已用完，可兑换次数码后再操作。")
+        db.execute(
+            "INSERT INTO rebindings(license_id,device,old_account_hash,new_account_hash,"
+            "previous_revision,revision,happened_at,extra_used) VALUES(?,?,?,?,?,?,?,?)",
+            (record["id"], device, record["account_hash"], new_account_hash,
+             record["revision"], record["revision"] + 1, now, int(budget["extra_next"])),
+        )
 
     def binding_status(self, device: str, body: dict, now: int) -> dict:
         from .store import _text, _validate_body
@@ -78,12 +106,7 @@ class RebindingMixin:
                 "UPDATE licenses SET account=?,account_hash=?,revision=? WHERE id=?",
                 (account, account_hash, revision, record["id"]),
             )
-            db.execute(
-                "INSERT INTO rebindings(license_id,device,old_account_hash,new_account_hash,"
-                "previous_revision,revision,happened_at) VALUES(?,?,?,?,?,?,?)",
-                (record["id"], device, record["account_hash"], account_hash,
-                 record["revision"], revision, now),
-            )
+            self._record_rebinding(db, record, account_hash, device, now)
             self._audit(db, now, device, "rebind", record["id"],
                         previous_revision=record["revision"], revision=revision,
                         rebind_used=quota["rebind_used"] + 1)

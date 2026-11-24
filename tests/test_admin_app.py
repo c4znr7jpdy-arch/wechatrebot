@@ -137,6 +137,71 @@ async def test_lockout_display_and_audit_are_generic(admin):
 
 
 @pytest.mark.asyncio
+async def test_simple_card_issuance_search_notes_and_contextual_revocation(admin):
+    await login(admin)
+    html = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    assert all(f'name="{name}"' not in html for name in ("owner_ref", "license_id", "device"))
+    response = await post(admin, "/codes", action="issue", plan="month", note='<script>客户甲</script>')
+    detail = response.headers["Location"].removeprefix(PREFIX[:-1])
+    code_id = detail.rsplit("/", 1)[1]
+    record = admin.store.admin_code_detail(code_id, now=NOW)
+    assert record["mode"] == "duration" and record["redeem_by"] == NOW + 30 * 86400
+    html = await (await admin.client.get(detail, cookies=admin.cookies)).text()
+    assert '<script>客户甲</script>' not in html and '&lt;script&gt;客户甲&lt;/script&gt;' in html
+    response = await post(admin, "/codes", action="search", tab="history", search=record["code"], kind="duration")
+    assert response.status == 200 and "Location" not in response.headers
+    html = await response.text()
+    assert code_id in html and record["code"] not in str(response.url)
+    response = await post(admin, "/codes", action="issue", mode="rebind_credit", rebind_credits="5")
+    credit_id = response.headers["Location"].rsplit("/", 1)[1]
+    response = await post(admin, "/codes", action="search", tab="history", kind="rebind_credit")
+    html = await response.text()
+    assert credit_id in html and code_id not in html and "微信换绑 +5 次" in html
+    await post(admin, "/codes", action="note", code_id=credit_id, note='客户乙 "尾号"')
+    assert admin.store.admin_code_detail(credit_id, now=NOW)["note"] == '客户乙 "尾号"'
+    await post(admin, "/codes", action="revoke", code_id=credit_id)
+    assert admin.store.admin_code_detail(credit_id, now=NOW)["revoked_at"] is None
+    await post(admin, "/codes", action="revoke", code_id=credit_id, confirm="on")
+    assert admin.store.admin_code_detail(credit_id, now=NOW)["revoked_at"] == NOW
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["recovery", "migration"])
+async def test_customer_detail_service_form_derives_owner_and_plan(admin, env, mode):
+    env.store, env.now = admin.store, NOW
+    original = redeem(env, issue(env, owner="old-stable-customer"))
+    admin.store.bind(env.device, {"license_id": original["id"], "account": "wxid_find_customer"}, NOW)
+    path = "/licenses/" + original["id"]
+    assert (await admin.client.get(path, allow_redirects=False)).status == 303
+    await login(admin)
+    response = await post(admin, "/codes", action="search", tab="licenses", search="wxid_find_customer")
+    assert path in await response.text()
+    await post(admin, "/codes", action="note", license_id=original["id"], note='<img src=x onerror="alert(1)">')
+    html = await (await admin.client.get(path, cookies=admin.cookies)).text()
+    assert "&lt;img" in html and '<img src=x' not in html
+    assert 'name="owner_ref"' not in html and 'name="plan"' not in html
+    forms = re.findall(r'<form.*?</form>', html, flags=re.S)
+    form = next(item for item in forms if f'name="mode" value="{mode}"' in item)
+    fields = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', form))
+    if mode == "migration":
+        fields["device"] = "a" * 64
+    denied = await admin.client.post("/codes", data={**fields, "csrf": "invalid"}, cookies=admin.cookies)
+    assert denied.status == 403
+    fields.pop("csrf")
+    response = await post(admin, "/codes", **fields)
+    assert response.status == 303 and response.headers["Location"].startswith(PREFIX + "codes/")
+    code = admin.store.admin_code_detail(response.headers["Location"].rsplit("/", 1)[1], now=NOW)
+    restored = redeem(env, code, device="a" * 64 if mode == "migration" else env.device)
+    assert restored["id"] == original["id"] and restored["valid_until"] == original["valid_until"]
+    assert restored["account"] == "wxid_find_customer"
+    assert admin.store.binding_status(restored["device"], {"license_id": restored["id"]}, NOW)["rebind_remaining"] == 1
+    await post(admin, "/codes", action="revoke", license_id=original["id"])
+    assert admin.store.admin_license_detail(original["id"], now=NOW)["status"] == "active"
+    await post(admin, "/codes", action="revoke", license_id=original["id"], confirm="on")
+    assert admin.store.admin_license_detail(original["id"], now=NOW)["status"] == "revoked"
+
+
+@pytest.mark.asyncio
 async def test_issue_automatic_reference_history_reveal_and_duplicate_rejected(admin):
     await login(admin)
     automatic = await issuance_fields(admin)
@@ -150,7 +215,7 @@ async def test_issue_automatic_reference_history_reveal_and_duplicate_rejected(a
     assert "复制激活码" in first and automatic["reference"] in first and "customer-one" in first
     assert code in await (await admin.client.get("/codes/" + code_id, cookies=admin.cookies)).text()
     second = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
-    assert code not in second and automatic["reference"] in second and "customer-one" in second
+    assert code not in second and automatic["reference"] not in second and "customer-one" in second
     await post(admin, "/codes", action="inspect", owner_ref="customer-one")
     queried = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
     assert code not in queried and "查询结果" in queried
@@ -158,7 +223,7 @@ async def test_issue_automatic_reference_history_reveal_and_duplicate_rejected(a
                valid_days="30", **automatic)
     assert "已经发过码" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
     assert admin.store.inspect()["codes"] == 1
-    await post(admin, "/codes", action="revoke", code_id=code_id)
+    await post(admin, "/codes", action="revoke", code_id=code_id, confirm="on")
     assert admin.store.inspect(owner_ref="customer-one")["codes"][0]["revoked_at"] == NOW
     with admin.store.connection() as db:
         rows = [dict(r) for r in db.execute("SELECT * FROM audit")]
@@ -218,7 +283,7 @@ async def test_history_filters_escapes_details_and_requires_login(admin):
     assert "共 0 条记录" in html and code_id not in html
     html = await (await admin.client.get("/codes", params={"code_id": code_id}, cookies=admin.cookies)).text()
     assert "共 1 条记录" in html
-    await post(admin, "/codes", action="revoke", code_id=code_id)
+    await post(admin, "/codes", action="revoke", code_id=code_id, confirm="on")
     html = await (await admin.client.get("/codes", params={"status": "revoked"}, cookies=admin.cookies)).text()
     assert "共 1 条记录" in html and "已撤销" in html
     response = await admin.client.get(detail, cookies=admin.cookies)
@@ -265,11 +330,10 @@ async def test_paid_migration_quota_query_consumption_and_renewal(admin, env):
     admin.store.bind(env.device, {"license_id": original["id"], "account": "wxid_original"}, NOW)
     path = "/codes/" + original_code["code_id"]
     html = await (await admin.client.get(path, cookies=admin.cookies)).text()
-    assert "换绑剩余 1 次（累计 1 次，已用 0 次）" in html
-    await post(admin, "/codes", action="inspect", license_id=original["id"])
-    html = await (await admin.client.get("/codes", cookies=admin.cookies)).text()
-    assert "换绑剩余 1 次（累计 1 次，已用 0 次）" in html
-    assert "迁移 / 换绑怎么操作" in html and "年付增加 10 次" in html
+    assert "换电脑剩余 1 次（累计 1 次，已用 0 次）" in html
+    html = await (await admin.client.get("/licenses/" + original["id"], cookies=admin.cookies)).text()
+    assert "换电脑剩余 1 次（累计 1 次，已用 0 次）" in html
+    assert "更换电脑" in html and "年付增加 10 次" in html
     fields = dict(action="issue", mode="migration", plan="", owner_ref="customer-one",
                   license_id=original["id"], device=env.device, reset_account="on", valid_days="30")
     response = await post(admin, "/codes", **fields)
@@ -279,19 +343,19 @@ async def test_paid_migration_quota_query_consumption_and_renewal(admin, env):
     moved = redeem(env, detail)
     assert moved["account"] == "" and moved["valid_until"] == original["valid_until"]
     html = await (await admin.client.get(path, cookies=admin.cookies)).text()
-    assert "换绑剩余 0 次（累计 1 次，已用 1 次）" in html
+    assert "换电脑剩余 0 次（累计 1 次，已用 1 次）" in html
     before = admin.store.inspect()["codes"]
     response = await post(admin, "/codes", **fields)
     assert response.status == 303
-    assert "换绑次数已用完" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
+    assert "换电脑次数已用完" in await (await admin.client.get("/codes", cookies=admin.cookies)).text()
     assert admin.store.inspect()["codes"] == before
     renewal = issue(env, owner="customer-one", plan="year", mode="renewal", license_id=original["id"])
     redeem(env, renewal)
     html = await (await admin.client.get(path, cookies=admin.cookies)).text()
-    assert "换绑剩余 10 次（累计 11 次，已用 1 次）" in html
+    assert "换电脑剩余 10 次（累计 11 次，已用 1 次）" in html
     trial = issue(env, owner="trial-customer", plan="trial")
     html = await (await admin.client.get("/codes/" + trial["code_id"], cookies=admin.cookies)).text()
-    assert "尚未关联授权；试用不增加换绑次数" in html
+    assert "尚未关联授权；试用不增加换电脑次数" in html
 
 
 @pytest.mark.asyncio

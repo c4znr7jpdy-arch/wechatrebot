@@ -2,20 +2,25 @@
 
 const issueForm = document.querySelector('input[name="action"][value="issue"]')?.form;
 if (issueForm) {
-  const mode = issueForm.elements.namedItem("mode");
   const plan = issueForm.elements.namedItem("plan");
-  const license = issueForm.elements.namedItem("license_id");
-  const device = issueForm.elements.namedItem("device");
+  const credits = issueForm.elements.namedItem("rebind_credits");
   const updateFields = () => {
-    const restore = mode.value === "recovery" || mode.value === "migration";
-    if (restore) plan.value = "";
-    else if (!plan.value) plan.value = "month";
-    license.required = mode.value !== "new";
-    device.required = mode.value === "migration";
+    const topup = issueForm.elements.namedItem("mode").value === "rebind_credit";
+    document.getElementById("duration-fields").hidden = topup;
+    document.getElementById("credit-fields").hidden = !topup;
+    plan.disabled = topup;
+    credits.disabled = !topup;
   };
-  mode.addEventListener("change", updateFields);
+  issueForm.querySelectorAll('input[name="mode"]').forEach(control => control.addEventListener("change", updateFields));
+  issueForm.querySelectorAll("[data-credits]").forEach(button => button.addEventListener("click", () => {
+    credits.value = button.dataset.credits;
+  }));
   updateFields();
 }
+
+document.querySelectorAll('form[method="post"]').forEach(form => form.addEventListener("submit", () => {
+  form.querySelectorAll('button[type="submit"]').forEach(button => { button.disabled = true; });
+}));
 
 const codeInput = document.getElementById("activation-code");
 const copyButton = document.getElementById("copy-code");

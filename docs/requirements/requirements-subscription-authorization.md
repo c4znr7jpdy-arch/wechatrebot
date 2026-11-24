@@ -1,5 +1,7 @@
 # 订阅与授权：实现方案、完整链路及 TODO
 
+> 2026-11-24：普通发码已改为统一时长码和微信换绑次数码，客户参考号不再手填；查询、恢复与换机移入客户详情。当前规则及验证范围见[激活管理易用性专项](requirements-activation-management-usability.md)，其规则覆盖本文历史人工发码及额度说明中的差异。换电脑复用现有客户端迁移流程，不新增申请审批入口。源码完成不表示服务或管理器已发布。
+>
 > 2026-10-25 新增一小时自助试用：第 9 节保留已确认的需求基线，第 10 节记录实现及验证范围。源码实现不代表已部署服务、启用商业授权或更新本地机器人。前 8 节保留原人工发码方案和历史验证记录。
 
 > 2026-11-03：分发改为 GitHub Release，见 [requirements-github-release-distribution.md](requirements-github-release-distribution.md)；维护者管理后台将提供经登录与动态码保护的公网管理入口，见 [requirements-admin-console.md](requirements-admin-console.md)，本文中"没有公网管理员接口"的表述以该文档为准。

@@ -142,7 +142,7 @@ def test_v2_history_migration_preserves_legacy_code_redemption(env):
     assert redeem(env, code)["plan"] == "month"
     assert issue_record(env, reference="after-migration")["code"]
     with env.store.connection() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

@@ -19,6 +19,60 @@ async def exchange(client, code):
     return preview, result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired", [False, True])
+async def test_http_unassigned_cards_extend_existing_license_and_add_credits_once(setup, tmp_path, expired, monkeypatch):
+    client, service, clock, _ = setup
+    store = LicenseStore(tmp_path / "server/activation.db")
+    server = TestServer(create_app(store, service.key, "test", clock=lambda: clock.server))
+    await server.start_server()
+    lose_response = False
+
+    def transport(url, request):
+        nonlocal lose_response
+        action = url.rsplit("/", 1)[-1]
+        result = http_transport(str(server.make_url("/v1/" + action)), request)
+        if action == "redeem" and lose_response:
+            lose_response = False
+            raise OSError("simulated lost top-up response")
+        return result
+
+    try:
+        client.transport = transport
+        code = store.issue_code(reference="new-card", now=clock.server, mode="duration", plan="month")
+        _, original = await exchange(client, code["code"])
+        await asyncio.to_thread(client.bind, "wxid_existing")
+        renewal = store.issue_code(reference="renewal-card", now=clock.server, mode="duration", plan="month")
+        projected, renewed = await exchange(client, renewal["code"])
+        assert projected["mode"] == "renewal" and projected["account"] == "wxid_existing"
+        assert renewed["license_id"] == original["license_id"] and renewed["valid_until"] > original["valid_until"]
+        if expired:
+            clock.advance(renewed["valid_until"] - clock.server + 10)
+            await asyncio.to_thread(client.refresh)
+        credit = store.issue_code(reference="credit-card", now=clock.server, mode="rebind_credit", rebind_credits=5)
+        # Clients with the former accepted-mode set reject the new card in preview,
+        # leaving it available for redemption after the manager is updated.
+        from wechatrebot_manager.licensing import client as client_module
+        with monkeypatch.context() as legacy:
+            legacy.setattr(client_module, "CODE_MODES", client_module.CODE_MODES - {"rebind_credit"})
+            with pytest.raises(LicenseError) as rejected:
+                await asyncio.to_thread(client.preview, credit["code"])
+            assert rejected.value.code == "invalid_response"
+        assert store.admin_code_detail(credit["code_id"], now=clock.server)["status"] == "unredeemed"
+        prepared = await asyncio.to_thread(client.preview, credit["code"])
+        assert prepared["rebind_before"] == 1 and prepared["rebind_after"] == 6
+        lose_response = True
+        with pytest.raises(LicenseError, match="授权服务"):
+            await asyncio.to_thread(client.redeem, credit["code"], prepared["preview_id"])
+        _, restored = await exchange(client, credit["code"])
+        assert restored["valid_until"] == renewed["valid_until"] and restored["license_id"] == original["license_id"]
+        quota = await asyncio.to_thread(client.binding_status)
+        assert quota["rebind_remaining"] == 6 and quota["can_rebind"] is (not expired)
+        assert not restored["can_run"]
+    finally:
+        await server.close()
+
+
 def replacement_client(client, root, transport, clock, protection):
     config = root / "config/licensing.json"
     config.parent.mkdir(parents=True)
