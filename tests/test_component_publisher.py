@@ -72,13 +72,13 @@ def candidate(tmp_path, monkeypatch):
     bases = [_baseline(tmp_path / f"base-{index}", f"answer = {index}\n", f"1.0.{21+index}")
              for index in range(2)]
     output = root / "artifacts/publish"
-    args = ["--dry-run", "--output", str(output)]
+    args = ["--component-only", "--dry-run", "--output", str(output)]
     for base in bases:
         args += ["--baseline", str(base)]
     return module, channel, root, output, args
 
 
-def test_default_builds_only_component_candidates_and_recovers_without_default_package(candidate):
+def test_explicit_component_mode_recovers_without_default_package(candidate):
     module, channel, root, output, args = candidate
     assert module.main(args) == 0
     record, release, assets = module._load_candidate(output, repo=REPO, version="1.0.23", channel=channel)
@@ -148,7 +148,7 @@ def test_component_smoke_downloads_and_applies_every_base_before_caching(candida
 def test_missing_baseline_never_falls_back_to_full(candidate):
     module, _channel, _root, _output, args = candidate
     with pytest.raises(ValueError, match="缺少发布基线"):
-        module.main(args[:3])
+        module.main(args[:4])
 
 
 def test_standalone_manager_update_keeps_next_component_base_available(candidate, tmp_path):
@@ -177,7 +177,7 @@ def test_standalone_manager_update_keeps_next_component_base_available(candidate
     assert len(bases) == 2 and old.exists()
     new = next(path for path in bases if path != old)
     assert (new / "manager/WeChatReBot.exe").read_bytes() == b"manager-update"
-    assert module.main(args[:3]) == 0
+    assert module.main(args[:4]) == 0
     manifest = json.loads((output / "update/stable.json").read_text("utf-8"))
     selected = module.parse_update_manifest(manifest, channel, current_version="1.0.22", install_root=new)
     assert selected.base_fingerprint == installed_payload_fingerprint(new)
