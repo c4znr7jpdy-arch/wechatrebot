@@ -40,6 +40,19 @@ def _normalized(path: Path) -> Path:
     return Path(os.path.abspath(os.path.expandvars(os.path.expanduser(str(path)))))
 
 
+def extended_windows_path(path: Path) -> Path:
+    """Return an absolute Win32 extended path without changing non-Windows paths."""
+    resolved = path.expanduser().resolve()
+    if os.name != "nt":
+        return resolved
+    raw = str(resolved)
+    if raw.startswith("\\\\?\\"):
+        return resolved
+    if raw.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + raw[2:])
+    return Path("\\\\?\\" + raw)
+
+
 def _is_within(path: Path, parent: Path) -> bool:
     try:
         path.relative_to(parent)

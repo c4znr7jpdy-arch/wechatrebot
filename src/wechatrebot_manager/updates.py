@@ -26,6 +26,7 @@ import zipfile
 from packaging.version import InvalidVersion, Version
 
 from .install_paths import INSTALL_MARKER
+from .install_paths import extended_windows_path as _extended_windows_path
 from .json_io import write_json_atomic
 from .payload import (
     COPY_BACKUP_PATHS,
@@ -338,19 +339,6 @@ def _safe_archive_path(value: str) -> Path:
     if any(os.path.isreserved(part) for part in posix.parts):
         raise UpdateError(f"更新包包含 Windows 保留路径：{value}")
     return Path(*posix.parts)
-
-
-def _extended_windows_path(path: Path) -> Path:
-    """Return an absolute Win32 extended path without changing non-Windows paths."""
-    resolved = path.expanduser().resolve()
-    if os.name != "nt":
-        return resolved
-    raw = str(resolved)
-    if raw.startswith("\\\\?\\"):
-        return resolved
-    if raw.startswith("\\\\"):
-        return Path("\\\\?\\UNC\\" + raw[2:])
-    return Path("\\\\?\\" + raw)
 
 
 def _path_within(path: Path, parent: Path) -> bool:
