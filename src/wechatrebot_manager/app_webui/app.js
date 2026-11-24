@@ -402,6 +402,7 @@
   }
 
   function renderStatus(rawStatus, {optimistic = false} = {}) {
+    renderRuntimeEnvironment(rawStatus?.runtime_environment);
     if (!optimistic) {
       state.lastRuntimeStatus = rawStatus;
       const stopped = ["STOPPED", "LICENSE_READY", "LICENSE_PAUSED", "ERROR", "STOP_WAIT_WECHAT"].includes(rawStatus?.state);
@@ -420,6 +421,7 @@
     const environment = status.environment || {};
     const current = status.state || "STOPPED";
     const online = Boolean(status.online);
+    const runtimeEnvironmentBlocked = status.runtime_environment?.ready === false && !online && !status.can_stop;
     const licenseWaiting = ["LICENSE_READY", "LICENSE_PAUSED"].includes(current);
     const waiting = current === "LICENSE_PAUSED" || ["WAITING_WECHAT", "VERIFYING_CONNECTION", "STOP_WAIT_WECHAT"].includes(current);
     const problem = current === "ERROR";
@@ -503,9 +505,9 @@
       void openFeature(state.selectedFeature, false, true);
     }
 
-    $("#stateTitle").textContent = confirmingConnection ? "正在确认连接"
+    $("#stateTitle").textContent = runtimeEnvironmentBlocked ? "运行环境未就绪" : confirmingConnection ? "正在确认连接"
       : verifyingLoggedIn ? (coreStarted ? "微信已登录，正在连接消息服务" : "微信已登录，正在启动机器人功能") : status.title;
-    $("#stateMessage").textContent = current === "STOP_WAIT_WECHAT"
+    $("#stateMessage").textContent = runtimeEnvironmentBlocked ? "请先完成上方的运行环境安装，再启动机器人。" : current === "STOP_WAIT_WECHAT"
       ? "关闭微信后会自动完成停止，也可再次点击“停止运行”立即结束机器人服务。"
       : confirmingConnection ? "微信连接状态暂时无法确认，正在重新检测。"
       : verifyingLoggedIn ? connectionProgress.message
@@ -1573,6 +1575,11 @@
     fullTime: (...args) => fullTime(...args),
     reportError: (...args) => reportError(...args),
     state,
+  });
+
+  const { renderRuntimeEnvironment } = createPageController("createRuntimeEnvironment", {
+    $, api: (...args) => api(...args), formatBytes: (...args) => formatBytes(...args),
+    refreshStatus: (...args) => refreshStatus(...args), reportError: (...args) => reportError(...args),
   });
 
   const { loadRuntimeAlerts, pollRuntimeAlerts } = createPageController("createRuntimeAlerts", {

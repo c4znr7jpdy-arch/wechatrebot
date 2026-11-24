@@ -22,6 +22,7 @@ from .activity_api import ActivityApiMixin
 from .schedule_api import ScheduleApiMixin
 from .model_api import AnalysisModelBindingError, ModelApiMixin
 from .update_api import UpdateApiMixin
+from .runtime_api import RuntimeApiMixin
 from .chat_history import ChatHistoryService
 from .contact_directory import ContactDirectoryService
 from .group_directory import GroupDirectoryService, GroupDirectoryError
@@ -96,6 +97,7 @@ PUBLIC_API_METHODS = (
     "rebind_license_account",
     "get_license_contact",
     "check_environment",
+    "install_runtime_environment",
     "start_robot",
     "stop_robot",
     "force_stop_robot",
@@ -196,7 +198,7 @@ def _asset_root() -> Path:
     raise FileNotFoundError("主界面资源缺失，请重新安装软件。")
 
 
-class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApiMixin, UpdateApiMixin):
+class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, ScheduleApiMixin, ModelApiMixin, UpdateApiMixin, RuntimeApiMixin):
     def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
         self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
@@ -560,6 +562,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
         if callable(resume_ready) and resume_ready():
             self._queue_robot_action("resume_pending_start", "正在继续启动机器人。", "13001")
         result = view.to_dict()
+        result["runtime_environment"] = self._runtime_environment_status()
+        if not result["runtime_environment"]["ready"]:
+            result["can_start"] = False
         robot_action = getattr(self, "_robot_action", "")
         if robot_action in {"start", "resume_pending_start"}:
             # Queue acceptance precedes the worker's first lifecycle transition.
@@ -627,6 +632,9 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
             self._action_lock.release()
             return self._ok({"accepted": False}, message="更新正在安装，请稍候。")
         if action in {"start", "connect_wechat", "resume_pending_start"}:
+            if not self._runtime_environment_status()["ready"]:
+                self._action_lock.release()
+                return self._ok({"accepted": False}, message="请先在运行中心安装运行环境。")
             try:
                 if (has_pending_migrations(self._install_root)
                         or has_pending_group_analysis_migration(self._install_root)):

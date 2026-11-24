@@ -102,6 +102,11 @@
             <button class="button secondary" id="homeLicenseAction" type="button" disabled>查看授权</button>
           </section>
 
+          <section class="license-notice runtime-environment" id="runtimeEnvironment" aria-label="运行环境安装" hidden>
+            <div role="status" aria-live="polite"><strong id="runtimeEnvironmentTitle">准备运行环境</strong><p id="runtimeEnvironmentMessage"></p><p id="runtimeEnvironmentSize"></p><progress id="runtimeEnvironmentProgress" max="100" value="0" aria-label="运行环境安装进度" hidden></progress></div>
+            <button class="button primary" id="installRuntimeEnvironment" type="button" disabled>安装运行环境</button>
+          </section>
+
           <section class="environment-alert" id="environmentAlert" hidden>
             <div class="alert-code"><span>环境检查</span><strong id="environmentCode">11001</strong></div>
             <div class="alert-copy"><h2 id="environmentTitle">未检测到微信</h2><p id="environmentMessage"></p><ol id="environmentSolutions"></ol></div>
@@ -534,6 +539,7 @@
   <script src="settings.js"></script>
   <script src="activity.js"></script>
   <script src="runtime-alerts.js"></script>
+  <script src="runtime-environment.js"></script>
   <script src="updates.js"></script>
   <script src="preview.js"></script>
   <script src="app.js?v=20261119-chat-history-retention"></script>

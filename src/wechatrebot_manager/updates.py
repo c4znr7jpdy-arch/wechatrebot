@@ -51,6 +51,7 @@ from .update_cache import (
     restore_update_archive,
 )
 from .update_errors import UpdateFailure
+from .update_download import download_verified
 from .update_logger import UpdateLogger
 from .update_rollback import (
     UpdateFileBackup,
@@ -579,37 +580,10 @@ def prepare_update(
             updates_root, release, final_archive, progress_callback=progress_callback,
         )
         if cached is None:
-            archive = working / "update.zip.download"
-            request = urllib.request.Request(
-                release.package_url,
-                headers={"Accept": "application/zip", "User-Agent": f"WeChatReBot/{release.version}"},
-            )
             logger.write("download_started", state="downloading", version=release.version)
-            digest = hashlib.sha256()
-            received = 0
-            with urllib.request.urlopen(
-                request, timeout=channel.request_timeout_seconds
-            ) as response, archive.open("wb") as output:
-                _safe_https_url(response.geturl())
-                length = response.headers.get("Content-Length")
-                if length is not None and int(length) != release.package_size:
-                    raise UpdateError("更新包大小与发布清单不一致。")
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    received += len(chunk)
-                    if received > min(channel.max_package_bytes, release.package_size):
-                        raise UpdateError("更新包下载体积超出发布清单。")
-                    output.write(chunk)
-                    digest.update(chunk)
-                    if progress_callback is not None:
-                        progress_callback("download", received, release.package_size)
-            if received != release.package_size:
-                raise UpdateError("更新包下载不完整。")
-            if digest.hexdigest().upper() != release.package_sha256:
-                raise UpdateFailure("UPD-1003", "下载文件摘要和签名清单不一致。")
-            os.replace(archive, final_archive)
+            download_verified(release.package_url, final_archive, size=release.package_size,
+                              sha256=release.package_sha256, channel=channel,
+                              progress_callback=progress_callback)
         else:
             logger.write("download_restored", state="verified", version=release.version)
         try:
@@ -648,6 +622,10 @@ def prepare_update(
             logger.write("cache_receipt_failed", state="verified", version=release.version,
                          message=str(exc))
         logger.write("package_verified", state="verified", version=release.version)
+        if verified.manifest.get("application_package") == 1:
+            from .runtime_deployment import prepare_deployment
+            payload_root = prepare_deployment(payload_root, root, working, channel,
+                                              progress_callback=progress_callback)
         return PreparedUpdate(release, working, payload_root, final_archive)
     except Exception as exc:
         if isinstance(exc, UpdateFailure):
@@ -709,7 +687,7 @@ def create_update_plan(
     verified = verify_payload(prepared.payload_root)
     if (prepared.payload_root.parent / "payload-consumed.json").exists():
         raise UpdateError("上次安装已使用暂存文件，请重新准备更新；已下载的包会保留。")
-    automatic_install = automatic_install and verified.manifest.get("schema_version") == 1
+    automatic_install = automatic_install and verified.manifest.get("schema_version") in {1, 3}
     _validate_selected_package(prepared.release, verified.manifest)
     _validate_update_baseline(prepared.payload_root, root)
     source_executable = Path(executable or sys.executable).expanduser().resolve()
@@ -1173,11 +1151,27 @@ def apply_update_plan(
                 return 0
         parents_exited = True
         verified = verify_payload(payload_root, progress_callback=progress_callback)
+        if verified.manifest.get("application_package") == 1:
+            # A legacy manager can hand the small application to its new helper.
+            # Prepare its environment before changing any installed application bytes.
+            from .runtime_deployment import prepare_deployment
+            assert_update_runtime_stopped(payload_root, root)
+            payload_root = prepare_deployment(payload_root, root, Path(plan_path).parent,
+                                              load_update_channel(root), progress_callback=progress_callback)
+            plan["payload_root"] = str(payload_root)
+            write_json_atomic(Path(plan_path), plan)
+            verified = verify_payload(payload_root)
+        if verified.manifest.get("schema_version") == 3:
+            from .runtime_deployment import verify_deployment_environment
+            from .runtime_install import recover_environment
+            assert_update_runtime_stopped(payload_root, root)
+            recover_environment(root)
+            verify_deployment_environment(payload_root, root, load_update_channel(root))
         manager_changed = Path("manager/WeChatReBot.exe") in {item.relative_path for item in verified.files}
         consume_prepared = (
             plan.get("consume_prepared_payload") is True
             and plan.get("automatic_install") == 1
-            and verified.manifest.get("schema_version") == 1
+            and verified.manifest.get("schema_version") in {1, 3}
         )
         _validate_update_baseline(payload_root, root)
         assert_update_runtime_stopped(payload_root, root)

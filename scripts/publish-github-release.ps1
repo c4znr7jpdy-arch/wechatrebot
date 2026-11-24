@@ -7,20 +7,24 @@ $publishExitCode = 1
 $interactive = $args.Count -eq 0
 if ($interactive) {
     Write-Host "GitHub 更新发布"
-    Write-Host "1. 发布组件更新（默认：插件、桥接、资源及必要的管理器）"
-    Write-Host "2. 仅生成组件候选（不上传）"
+    Write-Host "1. 发布完整应用（默认：运行环境独立复用）"
+    Write-Host "2. 仅生成完整应用候选（不上传）"
     Write-Host "3. 继续上次发布 / 验证已手动上传的文件"
     Write-Host "4. 回滚线上稳定清单"
     Write-Host "5. 登记已发布完整 staging 为组件基线"
     Write-Host "6. 检查组件基线兼容性（不构建）"
     Write-Host "7. 只发布管理器更新"
+    Write-Host "8. 发布旧模式组件更新"
     Write-Host "0. 退出"
     $choice = Read-Host "请选择"
     switch ($choice) {
         { $_ -in "1", "2" } {
             $releaseTitle = Read-Host "更新标题"
             $releaseNote = Read-Host "给用户看的更新说明"
-            $args = @("--component-only", "--title", $releaseTitle, "--note", $releaseNote)
+            $runtimeSource = Read-Host "日常更新直接回车；首次拆分输入已有运行环境目录；依赖变化输入 重建环境"
+            $args = @("--application", "--title", $releaseTitle, "--note", $releaseNote)
+            if ($runtimeSource.Trim() -eq "重建环境") { $args += "--refresh-environment" }
+            elseif ($runtimeSource.Trim()) { $args += @("--runtime-root", $runtimeSource.Trim('"')) }
             if ($choice -eq "2") { $args += "--dry-run" }
         }
         "3" {
@@ -40,6 +44,11 @@ if ($interactive) {
             $releaseTitle = Read-Host "更新标题"
             $releaseNote = Read-Host "给用户看的更新说明"
             $args = @("--manager-only", "--title", $releaseTitle, "--note", $releaseNote)
+        }
+        "8" {
+            $releaseTitle = Read-Host "更新标题"
+            $releaseNote = Read-Host "给用户看的更新说明"
+            $args = @("--component-only", "--title", $releaseTitle, "--note", $releaseNote)
         }
         default { exit 0 }
     }

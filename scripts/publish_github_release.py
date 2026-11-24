@@ -647,6 +647,7 @@ def _load_candidate(output: Path, *, repo: str, version: str, channel: UpdateCha
     if (archive is None or archive.stat().st_size != parsed.package_size
             or sha256_file(archive) != parsed.package_sha256):
         raise ValueError("恢复候选更新包与签名清单不一致")
+    _verify_runtime_assets(manifest, assets, channel=channel, remote=False)
     previous = candidate.get("previous_manifest")
     if previous:
         _verify_signed_manifest(previous, channel, previous["version"])
@@ -654,6 +655,40 @@ def _load_candidate(output: Path, *, repo: str, version: str, channel: UpdateCha
                                   package_url=parsed.package_url, package_size=parsed.package_size,
                                   package_sha256=parsed.package_sha256)
     return candidate, release, assets
+
+
+def _verify_runtime_assets(manifest: dict, assets: list[Path], *, channel: UpdateChannel, remote: bool) -> None:
+    reference = manifest.get("runtime_environment")
+    if reference is None:
+        return
+    from wechatrebot_manager.runtime_manifest import ENVIRONMENT_MANIFEST, parse_environment
+    import zipfile
+
+    if not isinstance(reference, dict):
+        raise ValueError("环境清单引用格式无效")
+    asset = next((path for path in assets if path.name == "runtime-environment.json"), None)
+    if asset is None or asset.stat().st_size != reference.get("size") or sha256_file(asset) != reference.get("sha256"):
+        raise ValueError("环境清单与签名发布清单不一致")
+    environment = parse_environment(_load_manifest(asset), channel)
+    if sum(package.size for package in environment.packages) != manifest.get("environment_size"):
+        raise ValueError("环境下载总大小不一致")
+    application = next((path for path in assets if path.name == manifest["package"]["url"].rsplit("/", 1)[-1]), None)
+    if application is None:
+        raise ValueError("缺少完整应用包")
+    with zipfile.ZipFile(application) as bundle:
+        embedded = json.loads(bundle.read("payload/" + ENVIRONMENT_MANIFEST.as_posix()))
+    if embedded != environment.manifest:
+        raise ValueError("应用内的环境清单与发布清单不一致")
+    if remote:
+        verify_public_asset(reference["url"], expected_size=reference["size"],
+                            expected_sha256=reference["sha256"], timeout=channel.request_timeout_seconds)
+        local_names = {path.name for path in assets}
+        for package in environment.packages:
+            # Newly uploaded assets were verified by _publish_assets. Historical
+            # shared assets must also remain downloadable before stable changes.
+            if package.url.rsplit("/", 1)[-1] not in local_names:
+                verify_public_asset(package.url, expected_size=package.size,
+                                    expected_sha256=package.sha256, timeout=channel.request_timeout_seconds)
 
 
 def _same_manifest(left: dict | None, right: dict | None) -> bool:
@@ -715,7 +750,7 @@ def _finish_publication(repo: str, release, *, channel: UpdateChannel, work_root
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="构建、签名并发布到 GitHub Release；稳定清单放在 stable 标签。")
     parser.add_argument("--source-root", type=Path, default=COMMERCIAL_ROOT / "vendor")
-    parser.add_argument("--title", default="组件更新")
+    parser.add_argument("--title", default="应用更新")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--minimum-supported-version", default="0.7.0")
     parser.add_argument("--build", type=int)
@@ -728,7 +763,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--manager-build", type=Path, help="--manager-only 时复用已完成的管理器构建目录")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--manager-only", action="store_true", help="只发布管理器增量包")
-    modes.add_argument("--component-only", action="store_true", help="按发布基线生成组件小包（默认）")
+    modes.add_argument("--component-only", action="store_true", help="兼容旧发布流程的组件小包")
+    modes.add_argument("--application", action="store_true", help="完整应用包 + 独立复用的运行环境")
+    parser.add_argument("--runtime-root", type=Path, help="显式拆分已验证的运行环境构建；不自动重建")
+    parser.add_argument("--refresh-environment", action="store_true", help="显式重建变更的运行环境并生成独立包")
+    parser.add_argument("--environment-manifest", type=Path, help="复用已发布的签名运行环境清单")
     modes.add_argument("--full", action="store_true", help="明确执行完整载荷构建")
     parser.add_argument("--baseline", type=Path, action="append", default=[],
                         help="发布专用基线快照或完整 staging；默认读取 artifacts/component-baselines")
@@ -755,6 +794,13 @@ def _build_candidate(args, *, version: str, channel: UpdateChannel, live_version
     publisher._signing_key(private_key, channel)
     tag = release_tag(version)
     repo = _repo(urllib.parse.urlsplit(prefix).path.strip("/").split("/releases/")[0])
+    if args.application:
+        if args.refresh_environment and not args.yes:
+            if input("本次将重建 Python 依赖和 FFmpeg 环境，可能耗时数十分钟并占用数 GB 空间。输入 重建环境 确认：").strip() != "重建环境":
+                raise ValueError("未确认环境重建，已取消。")
+        from build_application_release import build_application
+        return build_application(args, root=COMMERCIAL_ROOT, output=output, version=version,
+                                 channel=channel, prefix=prefix, live_version=live_version)
     if args.component_only:
         from build_update_release import build_component_release
         from prepare_component_update import prepare_component_payloads, snapshot_baseline
@@ -824,8 +870,15 @@ def _build_candidate(args, *, version: str, channel: UpdateChannel, live_version
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if not (args.manager_only or args.full):
-        args.component_only = True
+    if not (args.manager_only or args.full or args.application or args.component_only):
+        args.component_only = bool(args.baseline or args.register_baseline or args.plan)
+        args.application = not args.component_only
+    if (args.runtime_root or args.environment_manifest or args.refresh_environment) and not args.application:
+        parser.error("环境参数只适用于 --application")
+    if args.refresh_environment and args.runtime_root:
+        parser.error("重建环境和复用已有环境目录不能同时选择")
+    if args.application and args.incremental_payload:
+        parser.error("完整应用模式不附加组件增量包")
     if args.baseline and not args.component_only:
         parser.error("--baseline 只适用于组件更新")
     if args.component_only and args.incremental_payload:
@@ -911,6 +964,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("只有原签名候选可恢复已上线的同版本")
         release, assets = _build_candidate(args, version=version, channel=channel,
                                           live_version=live_version, prefix=prefix, output=output)
+        _verify_runtime_assets(_load_manifest(release.manifest_path), assets, channel=channel, remote=False)
         candidate = _save_candidate(output, release, assets, repo=repo, target=_git_head(),
                                     title=args.title, notes=tuple(args.note), previous=live)
 
@@ -948,6 +1002,12 @@ def main(argv: list[str] | None = None) -> int:
         receipt.update(status="failed_before_promotion", error=_safe_error(exc))
         _write_json(receipt_path, receipt)
         raise
+    try:
+        _verify_runtime_assets(_load_manifest(release.manifest_path), assets, channel=channel, remote=True)
+    except Exception as exc:
+        receipt.update(status="failed_before_promotion", error=_safe_error(exc))
+        _write_json(receipt_path, receipt)
+        raise
     receipt["assets_verified"] = True
     if args.prepare_only:
         receipt.update(status="awaiting_admin_confirmation", stable_changed=False,
@@ -960,6 +1020,9 @@ def main(argv: list[str] | None = None) -> int:
     _finish_publication(repo, release, channel=channel, work_root=work_root, target=candidate["target"],
                         previous=candidate.get("previous_manifest"), skip_smoke=args.skip_remote_smoke,
                         receipt=receipt)
+    if _load_manifest(release.manifest_path).get("runtime_environment"):
+        _write_json(COMMERCIAL_ROOT / "artifacts/runtime-environment/latest.json",
+                    _load_manifest(output / "runtime-environment.json"))
     try:
         _cache_component_baselines(output, channel)
         receipt["baseline_cache"] = "saved"

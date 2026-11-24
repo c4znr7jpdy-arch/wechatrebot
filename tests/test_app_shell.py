@@ -1776,6 +1776,7 @@ def test_check_update_returns_customer_safe_release(monkeypatch, tmp_path: Path)
         "notes": ["聊天记录更易查找"],
         "published_at": "2026-09-03T00:00:00Z",
         "package_size": 1234,
+        "environment_size": 0,
         "package_kind": "default",
         "mandatory": False,
         "build": None,
@@ -2427,6 +2428,7 @@ const state = {historyAccount:"", historyReadyAccount:"", activePage:"home"};
 const subscription = {updateRuntime(){}};
 const contactProfile = {updateAccount(){}};
 const reconcileStartPending = status => status;
+const renderRuntimeEnvironment = () => {};
 const invalidateHistoryState = () => {};
 const renderHistoryAccountGate = () => {};
 const invalidateScheduledContext = () => {};

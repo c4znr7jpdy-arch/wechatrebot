@@ -461,10 +461,10 @@ def _release_manifest(
     }
 
 
-def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[str, object]:
+def _validate_runtime_root(runtime_root: Path, commercial_root: Path, *, application_only: bool = False) -> dict[str, object]:
     helper = runtime_root / "python/Lib/site-packages/astrbot/core/platform/wechat_group_policy.py"
     expected_helper = commercial_root / "src/wechatrebot_manager/group_feature_runtime.py"
-    if not helper.is_file() or helper.read_text(encoding="utf-8") != expected_helper.read_text(encoding="utf-8"):
+    if not application_only and (not helper.is_file() or helper.read_text(encoding="utf-8") != expected_helper.read_text(encoding="utf-8")):
         raise RuntimeError("Runtime group command filter is incomplete or stale; rebuild the runtime")
     python_exe = runtime_root / "python" / "python.exe"
     runtime_manifest_path = runtime_root / "runtime-manifest.json"
@@ -495,6 +495,8 @@ def _validate_runtime_root(runtime_root: Path, commercial_root: Path) -> dict[st
         if wheelhouse.get(key) != expected.get(key):
             raise RuntimeError(f"runtime wheelhouse fingerprint mismatch: {key}")
     _validate_ffmpeg_runtime(runtime_root, commercial_root, runtime_manifest.get("ffmpeg"))
+    if application_only:
+        return runtime_manifest
     validate_runtime_bundle(commercial_root, runtime_root / "python/Lib/site-packages",
                             runtime_manifest.get("licensing_bundle_sha256"))
     for key, (relative_path, label) in CORE_ASTRBOT_PATCHES.items():

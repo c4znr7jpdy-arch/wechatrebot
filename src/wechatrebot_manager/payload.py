@@ -213,27 +213,48 @@ def _read_installed_manifest_for_merge(root: Path) -> dict[str, object]:
     return result
 
 
+def _manifest_reused_specs(manifest: dict) -> tuple[tuple[Path, str], ...]:
+    entries = manifest.get("reuse", [])
+    if not isinstance(entries, list) or (entries and manifest.get("schema_version") != 3):
+        raise PayloadError("环境复用清单格式错误。")
+    result, seen = [], set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not _valid_digest(entry.get("sha256")):
+            raise PayloadError("环境复用文件摘要无效。")
+        from .runtime_manifest import runtime_path
+        relative = runtime_path(entry.get("path"))
+        key = relative.as_posix().casefold()
+        if key in seen:
+            raise PayloadError("环境复用文件路径重复。")
+        seen.add(key)
+        result.append((relative, entry["sha256"].upper()))
+    return tuple(result)
+
+
 def _manifest_specs(
     manifest: object,
 ) -> tuple[tuple[tuple[Path, str], ...], tuple[tuple[Path, str], ...]]:
-    if not isinstance(manifest, dict) or manifest.get("schema_version") not in (1, 2):
+    if not isinstance(manifest, dict) or manifest.get("schema_version") not in (1, 2, 3):
         raise PayloadError("不支持的载荷清单格式。")
     incremental = manifest["schema_version"] == 2
+    deployment = manifest["schema_version"] == 3
+    if deployment and manifest.get("update_kind") not in {"application", "environment"}:
+        raise PayloadError("分离式安装载荷缺少有效范围。")
     if incremental and (
         manifest.get("update_kind") != "incremental"
         or not _valid_digest(manifest.get("base_fingerprint"))
     ):
         raise PayloadError("增量载荷缺少有效的更新类型或基线指纹。")
-    if not incremental and (manifest.get("remove") or manifest.get("update_kind") == "incremental"):
+    if not incremental and not deployment and (manifest.get("remove") or manifest.get("update_kind") == "incremental"):
         raise PayloadError("增量操作必须使用第二版载荷清单。")
     entries = manifest.get("files")
-    removals = manifest.get("remove", []) if incremental else []
+    removals = manifest.get("remove", []) if incremental or deployment else []
     if not isinstance(entries, list) or not isinstance(removals, list) or not (entries or removals):
         raise PayloadError("载荷清单没有可安装文件。")
 
     specs: list[tuple[Path, str]] = []
     remove_specs: list[tuple[Path, str]] = []
-    seen: set[str] = set()
+    seen: set[str] = {path.as_posix().casefold() for path, _digest in _manifest_reused_specs(manifest)}
     for entry, removing in [(entry, False) for entry in entries] + [(entry, True) for entry in removals]:
         if not isinstance(entry, dict):
             raise PayloadError("载荷文件条目格式错误。")
@@ -247,6 +268,9 @@ def _manifest_specs(
             raise PayloadError("载荷不能直接覆盖安装清单。")
         if incremental:
             validate_incremental_path(relative)
+        if deployment:
+            from .runtime_deployment import validate_deployment_path
+            validate_deployment_path(relative, kind=manifest["update_kind"], removing=removing)
         expected = entry.get("sha256")
         if not _valid_digest(expected):
             raise PayloadError(f"SHA-256 格式错误：{relative.as_posix()}")
@@ -629,7 +653,7 @@ def install_payload(
         except (OSError, ValueError) as exc:
             raise PayloadError("已准备的安装文件必须位于安装目录的同盘更新区。") from exc
     removals = _manifest_specs(manifest)[1]
-    preserve_existing_user_config = preserve_existing_user_config or incremental
+    preserve_existing_user_config = preserve_existing_user_config or incremental or manifest.get("schema_version") == 3
     # Keep the check here as a final safety boundary for callers that bypass the
     # setup wizard or InstallRequest validation.
     path_validation = validate_install_path(
@@ -728,6 +752,11 @@ def install_payload(
 
         # Preparation can take time: recheck the base and every target before the
         # first installed file changes, including callback/concurrent edits.
+        reused = _manifest_reused_specs(manifest)
+        for relative, digest in reused:
+            target = _checked_target(root, relative)
+            if not target.is_file() or sha256_file(target) != digest:
+                raise PayloadError(f"复用的运行环境文件已改变：{relative.as_posix()}")
         if incremental:
             previous_manifest = _read_installed_manifest_for_merge(root)
             _validate_incremental_base(manifest, root, previous_manifest)
@@ -788,6 +817,8 @@ def install_payload(
 
         for index, (relative, _digest) in enumerate(removals, start=file_count + 1):
             target = _checked_target(root, relative)
+            if manifest.get("schema_version") == 3 and target.exists() and sha256_file(target) != _digest:
+                raise PayloadError(f"待清理的旧文件在准备后改变：{relative.as_posix()}")
             retain_target(target, index)
             target.unlink(missing_ok=True)
             if progress_callback is not None:
@@ -798,6 +829,8 @@ def install_payload(
             for entry in previous_manifest.get("files", [])
             if isinstance(entry, dict) and isinstance(entry.get("path"), str)
         }
+        for relative, digest in reused:
+            installed_by_path[relative.as_posix().casefold()] = {"path": relative.as_posix(), "sha256": digest}
         for item in installed_files:
             installed_by_path[item.relative_path.as_posix().casefold()] = {
                 "path": item.relative_path.as_posix(),
