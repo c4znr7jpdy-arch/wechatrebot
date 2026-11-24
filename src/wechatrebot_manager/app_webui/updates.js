@@ -143,18 +143,17 @@ window.createUpdateNotifications = function (helpers) {
     promptedReadyToken = ready.confirmation_token;
     confirmAction({
       title: closing ? "再次关闭管理器以继续更新？" : `安装 v${release.version}？`,
-      message: closing ? "上次未能自动关闭管理器，更新程序仍在等待。确认后会再次尝试关闭本窗口，继续同一次更新；无需重新下载。请先保存正在编辑的设置。"
-        : "更新包已下载并校验完成。更新会强制关闭机器人程序及当前连接的微信，是否确认？该微信中正在处理的消息和未发送的内容可能丢失。管理器会关闭并重新打开；请先保存正在编辑的设置。安装完成后会自动打开新版管理器。",
+      message: closing ? "上次未能自动关闭管理器，更新程序仍在等待。确认后将丢弃未保存的修改，再次关闭本窗口，继续同一次更新；无需重新下载。"
+        : "更新包已下载并校验完成。确认后将丢弃未保存的修改，强制关闭管理器、机器人程序及当前连接的微信。该微信中正在处理的消息和未发送的内容可能丢失。安装完成后会自动打开新版管理器。",
       confirmText: closing ? "再次关闭管理器" : "确认关闭并安装",
       cancelText: closing ? "返回管理器" : "稍后安装",
       intent: "danger",
       pendingText: closing ? "正在关闭管理器…" : "正在安装…",
       pendingMessage: closing ? "正在再次关闭管理器以继续更新。" : "正在关闭机器人程序及当前连接的微信，准备安装更新。请保持管理器打开。",
       onConfirm: async () => {
-        // This confirmation is already busy; keep checking other operations.
+        // Confirmation permits discarding drafts; active operations must finish before handoff.
         const pending = managerCloseState({ignoreModalBusy: true});
         if (pending.busy) throw new Error("机器人正在启动、停止或处理其他操作，请稍候；也可选择“稍后安装”，更新包会保留。");
-        if (pending.dirty) throw new Error("有设置尚未保存。请选择“稍后安装”，保存或处理修改后再安装；更新包会保留，无需重新下载。");
         const accepted = await api("install_update", release.version, ready.confirmation_token);
         if (!accepted?.accepted) throw new Error("机器人或更新操作尚未完成，请稍后再次确认安装；更新包会保留。");
         // Consent is consumed once accepted; progress reads must never retry it.
