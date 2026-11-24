@@ -18,19 +18,25 @@ from wechatrebot_manager.json_io import write_json_atomic
 from wechatrebot_manager.update_errors import UpdateFailure
 
 
-def full_plan(tmp_path, monkeypatch):
+def full_plan(tmp_path, monkeypatch, *, long_staging=False):
     install = tmp_path / "中文 安装"
     write(install, "manager/WeChatReBot.exe", b"old manager")
     write(install, "app/feature.txt", b"old feature")
     write(install, ".wechatrebot-install.json", b'{"schema_version":1,"state":"ready"}')
     write(install, "config/customer.json", b"customer configuration")
     working = install / "updates/.pending-full"
-    incoming = _ready_payload(working / "extracted/payload")
+    if long_staging:
+        staged_manager = working / "extracted/payload/manager/WeChatReBot.exe"
+        padding = "x" * max(0, 248 - len(str(staged_manager)))
+        working = working.with_name(working.name + padding)
+    fixture = _ready_payload(tmp_path / "fixture-payload")
+    working.mkdir(parents=True)
     archive = working / "update.zip"
     with zipfile.ZipFile(archive, "w") as packed:
-        for source in incoming.rglob("*"):
+        for source in fixture.rglob("*"):
             if source.is_file():
-                packed.write(source, "payload/" + source.relative_to(incoming).as_posix())
+                packed.write(source, "payload/" + source.relative_to(fixture).as_posix())
+    incoming = updates.extract_update_archive(archive, working / "extracted")
     release = updates.UpdateRelease(
         "1.0.25", "update", (), "", "https://example.test/a.zip",
         archive.stat().st_size, payload.sha256_file(archive), False,
@@ -45,8 +51,15 @@ def full_plan(tmp_path, monkeypatch):
     return install, prepared, plan
 
 
-def test_full_update_consumes_background_extraction_without_second_copy(tmp_path, monkeypatch):
-    install, prepared, plan = full_plan(tmp_path, monkeypatch)
+@pytest.mark.parametrize("long_staging", [
+    pytest.param(False, id="ordinary"),
+    pytest.param(True, id="extended", marks=pytest.mark.skipif(os.name != "nt", reason="Win32 paths")),
+])
+def test_full_update_consumes_background_extraction_without_second_copy(tmp_path, monkeypatch, long_staging):
+    install, prepared, plan = full_plan(tmp_path, monkeypatch, long_staging=long_staging)
+    if long_staging:
+        assert str(prepared.payload_root).startswith("\\\\?\\")
+        assert not str(install).startswith("\\\\?\\")
     assert plan.automatic_install
     assert plan.helper_executable.read_bytes() == b"old manager"
     original_archive = prepared.archive_path.read_bytes()

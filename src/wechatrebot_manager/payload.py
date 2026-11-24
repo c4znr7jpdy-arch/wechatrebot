@@ -13,7 +13,7 @@ from typing import BinaryIO, Callable, Mapping
 import uuid
 import zipfile
 
-from .install_paths import INSTALL_MARKER, validate_install_path
+from .install_paths import INSTALL_MARKER, extended_windows_path, validate_install_path
 from .json_io import write_json_atomic
 
 
@@ -619,7 +619,8 @@ def install_payload(
         if before_replace is None or incremental or not payload_root_path.is_dir():
             raise PayloadError("仅完整更新事务可以直接使用已准备的安装文件。")
         try:
-            relative = payload_root_path.relative_to(root)
+            # Long ZIP entries can put the extracted payload in the extended namespace.
+            relative = extended_windows_path(payload_root_path).relative_to(extended_windows_path(root))
             if not relative.parts or relative.parts[0] != "updates":
                 raise ValueError("outside update staging")
             _checked_target(root, relative, allow_directory=True)
