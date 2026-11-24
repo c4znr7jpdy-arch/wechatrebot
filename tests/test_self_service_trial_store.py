@@ -168,9 +168,17 @@ def test_manual_trial_code_cannot_bypass_machine_history_after_reinstall(env, fi
     device, pub = identity()
     next_code = issue(env, plan="trial", owner="different-customer")
     trial_request = {"code": next_code["code"], "machine_id": machine}
+    with env.store.connection() as db:
+        trial_history = list(db.execute("SELECT * FROM trials ORDER BY kind,identity_hash"))
     assert_error("trial_used", lambda: env.store.preview(device, trial_request, env.now))
-    assert_error("trial_used", lambda: env.store.redeem(device, pub, {**trial_request, "preview_id": "unused"}, env.now))
+    # An absent preview is rejected before redemption checks trial history.
+    assert_error("preview_required", lambda: env.store.redeem(
+        device, pub, {**trial_request, "preview_id": "unused"}, env.now,
+    ))
     assert env.store.inspect()["licenses"] == 1
+    with env.store.connection() as db:
+        assert list(db.execute("SELECT * FROM trials ORDER BY kind,identity_hash")) == trial_history
+        assert db.execute("SELECT redeemed_at FROM codes WHERE id=?", (next_code["code_id"],)).fetchone()[0] is None
 
 
 def test_self_service_cannot_bypass_manual_trial_machine_history(env):
