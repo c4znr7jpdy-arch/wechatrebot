@@ -124,7 +124,7 @@ def test_update_download_then_explicit_shutdown_consent(update_page, tmp_path: P
     assert page.evaluate("window.updateCalls.effects") == []
     page.evaluate("window.finishUpdateDownload()")
     expect(page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
-    expect(page.locator("#modalMessage")).to_contain_text("更新会强制关闭机器人程序及当前连接的微信，是否确认？")
+    expect(page.locator("#modalMessage")).to_contain_text("确认后将丢弃未保存的修改，强制关闭管理器、机器人程序及当前连接的微信。")
     expect(page.locator("#modalMessage")).to_contain_text("自动打开新版管理器")
     expect(page.locator("#modalConfirm")).to_be_enabled()
     assert page.evaluate("window.updateCalls.effects") == []
@@ -184,6 +184,8 @@ def test_failed_window_close_offers_close_retry_and_protects_explicit_exit(updat
     page.screenshot(path=str(tmp_path / "update-close-retry.png"))
     page.locator("#updateCardAction").click()
     expect(page.locator("#modalConfirm")).to_have_text("再次关闭管理器")
+    page.evaluate("window.updateTestState.featurePageDirty = true")
+    expect(page.locator("#modalMessage")).to_contain_text("丢弃未保存的修改")
     page.locator("#modalConfirm").click()
     expect(page.locator("#modalBackdrop")).to_be_hidden()
     assert page.evaluate("window.updateCalls.effects") == ["stop", "install"]
@@ -192,8 +194,19 @@ def test_failed_window_close_offers_close_retry_and_protects_explicit_exit(updat
 
 
 @pytest.mark.parametrize("editor", ["core", "provider", "feature", "schedule", "search", "group"])
-def test_install_preserves_unsaved_settings_and_the_downloaded_package(update_page, tmp_path, editor):
+def test_install_confirmation_discards_drafts_while_cancel_preserves_them(update_page, tmp_path, editor):
     page = update_page
+    page.evaluate("""() => {
+      window.updateDraftSaves = [];
+      for (const name of ['save_robot_core', 'save_feature', 'save_provider', 'save_web_search_settings',
+                          'save_scheduled_task', 'save_group_policy']) {
+        const save = window.pywebview.api[name];
+        window.pywebview.api[name] = (...args) => {
+          window.updateDraftSaves.push(name);
+          return save(...args);
+        };
+      }
+    }""")
     if editor == "core":
         page.set_viewport_size({"width": 1080, "height": 680})
     _check_automatically(page)
@@ -238,36 +251,29 @@ def test_install_preserves_unsaved_settings_and_the_downloaded_package(update_pa
         page.locator('#groupRows .group-row').first.click()
         field = page.locator('#groupPolicyForm [name="reply_mode"]')
         field.select_option("off")
-    saved_value = field.is_checked() if editor == "search" else field.input_value()
+    draft_value = field.is_checked() if editor == "search" else field.input_value()
     page.evaluate("window.finishUpdateDownload(); window.updateTestController.pollUpdateStatus()")
     expect(page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
-    page.locator("#modalConfirm").click()
-    expect(page.locator("#modalError")).to_contain_text("有设置尚未保存")
-    expect(page.locator("#modalError")).to_contain_text("无需重新下载")
-    assert page.evaluate("window.updateCalls.install") == []
-    page.screenshot(path=str(tmp_path / f"update-keeps-{editor}-draft.png"), animations="disabled")
+    expect(page.locator("#modalMessage")).to_contain_text("丢弃未保存的修改")
     page.locator("#modalCancel").click()
     expect(page.locator("#modalBackdrop")).to_be_hidden()
-    assert (field.is_checked() if editor == "search" else field.input_value()) == saved_value
+    assert (field.is_checked() if editor == "search" else field.input_value()) == draft_value
     expect(page.locator("#updateCardAction")).to_have_text("立即安装")
     assert len(page.evaluate("window.updateCalls.download")) == 1
     assert page.evaluate("window.testUpdateStatus.state") == "ready"
-    if editor == "core":
-        page.locator('#updateCardDismiss').click()
-        expect(page.locator('#updateCard')).to_be_hidden()
-        page.evaluate("window.updateTestController.pollUpdateStatus()")
-        expect(page.locator('#updateCard')).to_be_hidden()
-        page.screenshot(path=str(tmp_path / 'update-card-dismissed-core-save.png'), animations="disabled")
-        page.locator('#saveCore').click()
-        expect(page.locator('#coreNote')).to_contain_text("已更新")
-        expect(page.locator('#saveCore')).to_be_enabled()
-        page.locator('[data-settings-tab="system"]').click()
-        page.locator('#checkUpdate').click()
-        expect(page.locator('#modalTitle')).to_have_text("安装 v1.0.1？")
-        page.locator('#modalConfirm').click()
-        expect(page.locator('#modalBackdrop')).to_be_hidden()
-        assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
-        assert len(page.evaluate("window.updateCalls.download")) == 1
+    assert page.evaluate("window.updateCalls.effects") == []
+    assert page.evaluate("window.updateCalls.install") == []
+    page.locator('#updateCardAction').click()
+    expect(page.locator('#modalTitle')).to_have_text("安装 v1.0.1？")
+    page.screenshot(path=str(tmp_path / f"update-discard-{editor}-confirmation.png"), animations="disabled")
+    page.locator('#modalConfirm').click()
+    expect(page.locator('#modalBackdrop')).to_be_hidden()
+    assert page.evaluate("window.updateCalls.install") == [["1.0.1", "consent-release-first"]]
+    assert page.evaluate("window.updateCalls.effects") == ["stop", "install"]
+    assert page.evaluate("window.updateDraftSaves") == []
+    assert len(page.evaluate("window.updateCalls.download")) == 1
+    expect(page.locator('#updateStatus')).to_have_text("正在重新启动管理器")
+    page.screenshot(path=str(tmp_path / f"update-discard-{editor}-accepted.png"), animations="disabled")
 
 
 @pytest.mark.parametrize("width,theme", [(1380, "light"), (600, "dark")])
