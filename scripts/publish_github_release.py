@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import http.client
+from itertools import batched
 import json
 import os
 from pathlib import Path
@@ -206,10 +207,11 @@ def create_release(repo: str, tag: str, *, title: str, notes_file: Path, target:
 
 
 def upload_assets(repo: str, tag: str, paths: list[Path], *, clobber: bool = True) -> None:
-    if not paths:
-        return
-    _gh(["release", "upload", tag, *(str(path) for path in paths), "-R", repo,
-         *(["--clobber"] if clobber else [])])
+    # A split runtime can have hundreds of assets and checksums. Keep each
+    # GitHub CLI invocation comfortably within the Windows command-line limit.
+    for batch in batched(paths, 30):
+        _gh(["release", "upload", tag, *(str(path) for path in batch), "-R", repo,
+             *(["--clobber"] if clobber else [])])
 
 
 def publish_release(repo: str, tag: str, *, latest: bool | None = None) -> None:
