@@ -56,6 +56,7 @@ class UpdateRelease:
     uncompressed_size: int = 0
     package_kind: str = "default"
     base_fingerprint: str = ""
+    environment_size: int = 0
 
 
 def _safe_https_url(value: object, *, allow_empty: bool = False) -> str:
@@ -138,6 +139,9 @@ def _manifest_release_metadata(
         raise UpdateError("更新构建号无效。")
     if not isinstance(payload.get("mandatory", False), bool):
         raise UpdateError("强制更新标记格式错误。")
+    environment_size = payload.get("environment_size", 0)
+    if type(environment_size) is not int or not 0 <= environment_size <= MAX_UNCOMPRESSED_BYTES:
+        raise UpdateError("运行环境下载大小无效。")
     notes: list[str] = []
     for item in notes_value:
         if not isinstance(item, str):
@@ -153,6 +157,7 @@ def _manifest_release_metadata(
         "mandatory": payload.get("mandatory") is True,
         "build": build,
         "minimum_supported_version": str(minimum),
+        "environment_size": environment_size,
     }
 
 

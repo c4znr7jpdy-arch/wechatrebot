@@ -310,9 +310,14 @@ def build_service_specs(
         ),
     }
     hook_integrity_files = _hook_integrity_files(root)
+    engine_python = root / "app" / "engine" / "python"
+    engine_argv = (str(python_exe), "-m", "astrbot.cli.__main__", "run")
+    if engine_python.is_dir():
+        engine_argv = (str(python_exe), "-c", _RUN_MODULE_FROM_PATH,
+                       str(engine_python), "astrbot.cli.__main__", "run")
     astrbot = ServiceSpec(
         name="astrbot",
-        argv=(str(python_exe), "-m", "astrbot.cli.__main__", "run"),
+        argv=engine_argv,
         cwd=astrbot_root,
         log_file=logs_root / "astrbot-service.log",
         ready_host="127.0.0.1",
@@ -331,12 +336,15 @@ def build_service_specs(
     # managed bridge disables reuse, reserves another port, and launches the
     # robot's own WeChat instance, so this port must not be a supervisor-level
     # free-port requirement.
+    bridge_runner = _RUN_MODULE_FROM_PATH
+    if engine_python.is_dir():
+        bridge_runner = "import sys;sys.path.insert(0," + repr(str(engine_python)) + ");" + bridge_runner
     bridge = ServiceSpec(
         name="new-hook-bridge",
         argv=(
             str(python_exe),
             "-c",
-            _RUN_MODULE_FROM_PATH,
+            bridge_runner,
             str(bridge_root / "src"),
             "hook_bridge",
             "--config",

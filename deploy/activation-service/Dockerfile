@@ -12,6 +12,7 @@ COPY services/activation_service/admin/templates/* services/activation_service/a
 COPY src/wechatrebot_manager/__init__.py src/wechatrebot_manager/json_io.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/windows_process_job.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/update_cache.py src/wechatrebot_manager/
+COPY src/wechatrebot_manager/update_download.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/update_message.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/update_manifest.py src/wechatrebot_manager/
 COPY src/wechatrebot_manager/update_rollback.py src/wechatrebot_manager/

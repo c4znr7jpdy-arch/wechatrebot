@@ -83,13 +83,14 @@ def _distribution_relative_parts(relative: Path) -> tuple[str, ...]:
 
 def _is_trusted_vendor(relative: Path) -> bool:
     parts = _distribution_relative_parts(relative)
-    return parts[: len(TRUSTED_VENDOR_PREFIX)] == TRUSTED_VENDOR_PREFIX
+    return (parts[: len(TRUSTED_VENDOR_PREFIX)] == TRUSTED_VENDOR_PREFIX
+            or parts[:3] == ("app", "engine", "python"))
 
 
 def _is_patched_astrbot(relative: Path) -> bool:
     parts = _distribution_relative_parts(relative)
     prefix = (*TRUSTED_VENDOR_PREFIX, "astrbot")
-    return parts[: len(prefix)] == prefix
+    return parts[: len(prefix)] == prefix or parts[:4] == ("app", "engine", "python", "astrbot")
 
 
 def _is_corresponding_source(relative: Path) -> bool:

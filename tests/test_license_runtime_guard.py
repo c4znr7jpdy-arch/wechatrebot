@@ -133,6 +133,8 @@ def test_installed_module_path_takes_priority_over_environment(tmp_path):
     source_file = tmp_path / "source/src/wechatrebot_manager/licensing/runtime_guard.py"
     assert resolve_install_root(source_file, {"WECHATREBOT_INSTALL_ROOT": str(tmp_path / "dev")}) == tmp_path / "dev"
     assert resolve_install_root(source_file, {}) is None
+    application = tmp_path / "installed/app/engine/python/wechatrebot_manager/licensing/runtime_guard.py"
+    assert resolve_install_root(application, {"WECHATREBOT_INSTALL_ROOT": str(tmp_path / "wrong")}) == tmp_path / "installed"
 
 
 def test_unconfigured_legacy_mode_never_queries_wechat_or_starts_refresh(tmp_path):

@@ -357,6 +357,14 @@ window.createPreviewApi = function (helpers) {
     };
     // Only instantiated by the existing ?preview entry point; no live API uses these fixtures.
     const licenseParams = new URLSearchParams(window.location.search);
+    const runtimeDemo = licenseParams.get("runtime-environment");
+    let runtimeAttempts = 0;
+    if (runtimeDemo) {
+      setPreviewRuntime(false);
+      status.can_start = false;
+      status.runtime_environment = {state: "missing", ready: false, download_size: 392000000,
+        message: "首次使用前，请安装运行环境。"};
+    }
     const licenseDemo = licenseParams.get("demo") === "subscription" || licenseParams.has("license");
     const previewLicensePlans = [
       {id: "trial", name: "1 小时试用", price_fen: 0, duration_seconds: 3600},
@@ -530,6 +538,17 @@ window.createPreviewApi = function (helpers) {
       },
       bootstrap: () => ok({version: "1.0.0", install_root: "D:\\小妹", status, brand: {display_name: "小妹", short_name: "小妹", persona_name: "小妹", welcome_text: "你好，我是小妹。", admin_id: "wxid_admin"}, provider: {configured: false, api_base: "", model: "", api_key_configured: false}, providers: structuredClone(previewProviders), provider_presets: previewPresets, experience: structuredClone(previewExperience), readiness: previewOnboardingReadiness(), update: {enabled: true, channel: "stable", check_interval_seconds: 600, result: null}}),
       get_status: () => ok(status), check_environment: () => ok(status),
+      install_runtime_environment: () => {
+        runtimeAttempts += 1;
+        status.runtime_environment = {state: "installing", ready: false, percent: 45, message: "正在下载运行环境"};
+        window.setTimeout(() => {
+          const failed = runtimeDemo === "retry" && runtimeAttempts === 1;
+          status.runtime_environment = {state: failed ? "failed" : "ready", ready: !failed,
+            message: failed ? "下载中断，请重试。" : "运行环境已就绪。"};
+          status.can_start = !failed;
+        }, 1500);
+        return ok({accepted: true});
+      },
       start_robot: () => {
         if (licenseSnapshot().enabled && !licenseSnapshot().authorized) return licenseError("NOT_AUTHORIZED", "请完成授权后再启动。");
         if (licenseSnapshot().enabled && (!previewLicense.account || (status.runtime.wechat_identity && status.runtime.wechat_identity !== previewLicense.account))) return licenseError("account_mismatch", "请先确认授权绑定的微信账号。");

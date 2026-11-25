@@ -176,6 +176,7 @@ window.createUpdateNotifications = function (helpers) {
         release.title || "新版本已就绪",
         release.notes?.length ? release.notes.join("\n") : "",
         `更新包约 ${formatBytes(release.package_size)}。`,
+        release.environment_size ? `运行环境会自动复用，缺失时最多另需下载 ${formatBytes(release.environment_size)}。` : "",
         "点击更新后开始下载。下载完成后，会再次请你确认关闭机器人及当前连接的微信，再安装更新。",
       ].filter(Boolean).join("\n\n"),
       confirmText: "立即更新",

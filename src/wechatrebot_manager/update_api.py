@@ -64,6 +64,7 @@ class UpdateApiMixin:
             "notes": list(release.notes),
             "published_at": release.published_at,
             "package_size": release.package_size,
+            "environment_size": release.environment_size,
             "package_kind": release.package_kind,
             "mandatory": release.mandatory,
             "build": release.build,
@@ -176,6 +177,8 @@ class UpdateApiMixin:
 
     def _update_progress(self, phase: str, completed: int, total: int) -> None:
         labels = {
+            "runtime_check": "正在检查可复用的运行环境",
+            "runtime_download": "正在补齐运行环境",
             "download": "正在下载新版本",
             "extract": "正在解压更新包",
             "verify": "正在校验更新文件",

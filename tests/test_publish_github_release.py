@@ -175,6 +175,20 @@ def test_release_lifecycle_uses_draft_then_publish_and_clobbers_assets(tmp_path:
     assert "--latest=false" in gh.calls[4]
 
 
+def test_runtime_release_upload_stays_within_windows_command_limit(tmp_path, monkeypatch):
+    module = _module()
+    paths = [tmp_path / f"runtime-{index:064x}.zip" for index in range(250)]
+    paths += [path.with_suffix(".zip.sha256") for path in paths]
+    calls = []
+    monkeypatch.setattr(module, "_gh", calls.append)
+
+    module.upload_assets(REPO, "v1.0.30", paths, clobber=False)
+
+    assert [name for call in calls for name in call[3:-2]] == list(map(str, paths))
+    assert all(call[-2:] == ["-R", REPO] for call in calls)
+    assert all(len(subprocess.list2cmdline(["gh", *call])) < 32_767 for call in calls)
+
+
 def test_release_exists_true_when_view_succeeds(monkeypatch) -> None:
     module = _module()
     gh = _FakeGh({("release", "view", "stable"): '{"tagName":"stable"}'})

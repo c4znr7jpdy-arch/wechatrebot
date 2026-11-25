@@ -47,6 +47,8 @@ def resolve_install_root(module_file: str | Path = __file__, environ=None) -> Pa
     """Installed package placement is authoritative; environment is dev-only fallback."""
     path = Path(module_file).resolve()
     for parent in path.parents:
+        if parent.name.casefold() == "python" and [item.name.casefold() for item in list(parent.parents)[:2]] == ["engine", "app"]:
+            return parent.parents[2]
         if parent.name.casefold() != "site-packages":
             continue
         if [item.name.casefold() for item in list(parent.parents)[:3]] == ["lib", "python", "runtime"]:

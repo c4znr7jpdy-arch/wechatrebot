@@ -76,6 +76,7 @@ _MANAGER_WEB_ASSETS: frozenset[str] = frozenset({
     "/activity-errors.js",
     "/activity.css",
     "/runtime-alerts.js",
+    "/runtime-environment.js",
     "/runtime-alerts.css",
     "/core-settings.js",
     "/date-range.js",
