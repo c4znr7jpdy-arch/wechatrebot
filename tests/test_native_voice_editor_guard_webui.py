@@ -172,6 +172,8 @@ def test_voice_editor_guards_restore_but_allows_confirmed_update_to_discard_draf
       window.voiceUpdateStatus = {
         state:'ready',phase:'ready_to_install',version:release.version,release_id:release.release_id,
         confirmation_token:'voice-guard-consent'};
+      // Automatic checks must observe the same candidate as the injected status.
+      window.pywebview.api.check_update = async () => ({ok:true,data:{enabled:true,release}});
       window.pywebview.api.get_update_status = async () => ({ok:true,data:window.voiceUpdateStatus});
       return window.voiceGuardUpdates.refreshUpdate(true);
     }""")
@@ -182,7 +184,10 @@ def test_voice_editor_guards_restore_but_allows_confirmed_update_to_discard_draf
     expect(view.field).to_have_value("维护操作前的草稿" if dirty else "已保存的风格")
     _expect_editor(view, dirty=dirty, busy=pending)
     assert view.page.evaluate("window.voiceMaintenanceWrites") == []
+    view.page.evaluate("window.voiceGuardUpdates.refreshUpdate(false)")
+    expect(view.page.locator("#modalBackdrop")).to_be_hidden()
     view.page.evaluate("window.voiceGuardUpdates.refreshUpdate(true)")
+    expect(view.page.locator("#modalBackdrop")).to_be_visible()
     expect(view.page.locator("#modalTitle")).to_have_text("安装 v1.0.1？")
     view.page.locator("#modalConfirm").click()
     if pending:
