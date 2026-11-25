@@ -424,8 +424,12 @@ def _checked_target(root: Path, relative: Path, *, allow_directory: bool = False
     for component in (candidate, *candidate.parents):
         if component == root.parent:
             break
-        if component.is_symlink() or (
-            hasattr(component, "is_junction") and component.is_junction()
+        try:
+            info = component.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_reparse_tag", 0) == getattr(
+            stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003
         ):
             raise PayloadError(f"安装目标不能经过符号链接或目录联接：{relative.as_posix()}")
     target = candidate.resolve()
@@ -433,7 +437,11 @@ def _checked_target(root: Path, relative: Path, *, allow_directory: bool = False
         target.relative_to(root)
     except ValueError as exc:
         raise PayloadError(f"安装目标越过根目录：{relative.as_posix()}") from exc
-    if target.exists() and not target.is_file() and not (allow_directory and target.is_dir()):
+    try:
+        mode = target.stat().st_mode
+    except FileNotFoundError:
+        return target
+    if not stat.S_ISREG(mode) and not (allow_directory and stat.S_ISDIR(mode)):
         raise PayloadError(f"安装目标不是普通文件：{relative.as_posix()}")
     return target
 
@@ -646,10 +654,12 @@ def install_payload(
         else {"files": []}
     )
     _validate_incremental_base(manifest, root, previous_manifest)
-    targets = {
-        relative: _checked_target(root, relative)
-        for relative in [item.relative_path for item in planned] + [path for path, _digest in removals]
-    }
+    target_paths = [item.relative_path for item in planned] + [path for path, _digest in removals]
+    targets = {}
+    for index, relative in enumerate(target_paths, start=1):
+        targets[relative] = _checked_target(root, relative)
+        if progress_callback is not None and before_replace is not None:
+            progress_callback("validate", index, len(target_paths))
     manifest_target = _checked_target(root, Path("config/installed-payload.json"))
     updates_candidate = root / "updates"
     if updates_candidate.is_symlink() or (
@@ -731,12 +741,14 @@ def install_payload(
         if incremental:
             previous_manifest = _read_installed_manifest_for_merge(root)
             _validate_incremental_base(manifest, root, previous_manifest)
-        for relative in [item.relative_path for item in planned] + [path for path, _digest in removals]:
+        for index, relative in enumerate(target_paths, start=1):
             target = _checked_target(root, relative)
             if relative in unstaged and (
                 not target.is_file() or sha256_file(target) != unstaged[relative]
             ):
                 raise PayloadError(f"未变更文件在更新准备期间已改变：{relative.as_posix()}")
+            if progress_callback is not None and before_replace is not None:
+                progress_callback("recheck", index, len(target_paths))
         _checked_target(root, Path("config/installed-payload.json"))
         installed_files: list[VerifiedPayloadFile] = []
         for index, item in enumerate(verified_files, start=1):

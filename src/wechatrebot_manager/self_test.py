@@ -70,13 +70,18 @@ def manager_self_test(output: str | Path) -> dict[str, object]:
     except (OSError, ValueError, json.JSONDecodeError):
         error_codes_ready = False
     timezone_data_ready = _timezone_data_ready()
+    from .native_update_progress import native_progress_executable
+    native_update_ui = native_progress_executable().is_file()
+    frozen = bool(getattr(sys, "frozen", False))
     report = {
         "schema_version": 1,
-        "ok": app_assets and webview_ready and error_codes_ready and timezone_data_ready,
+        "ok": (app_assets and webview_ready and error_codes_ready and timezone_data_ready
+               and (native_update_ui or not frozen)),
         "manager_version": __version__,
         "python_version": platform.python_version(),
         "architecture": struct.calcsize("P") * 8,
-        "frozen": bool(getattr(sys, "frozen", False)),
+        "frozen": frozen,
+        "native_update_ui": native_update_ui,
         "tk_version": str(tkinter.TkVersion),
         "app_assets": app_assets,
         "webview2_backend": webview_ready,

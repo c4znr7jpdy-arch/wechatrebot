@@ -10,6 +10,16 @@ import subprocess
 import sys
 
 
+def _build_update_ui(output: Path, root: Path) -> Path:
+    # Both direct script execution and test/package imports are supported.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from build_native_installer import build_update_ui
+        return build_update_ui(output, root=root)
+    finally:
+        sys.path.pop(0)
+
+
 def _run(argv: list[str], *, cwd: Path, timeout: int | None = None) -> None:
     subprocess.run(argv, cwd=cwd, check=True, timeout=timeout)
 
@@ -88,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     dist = output / "dist"
+    update_ui = _build_update_ui(output / "native-update-ui", commercial_root)
     _run(
         [
             str(build_python),
@@ -108,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
             str(output / "spec"),
             "--paths",
             str(commercial_root / "src"),
+            "--add-data",
+            f"{update_ui}{os.pathsep}wechatrebot_manager",
             "--add-data",
             f"{commercial_root / 'src' / 'wechatrebot_manager' / 'plugin_webui'}{os.pathsep}wechatrebot_manager/plugin_webui",
             "--add-data",
@@ -145,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     if (
         not result.get("ok") or not result.get("frozen")
         or result.get("architecture") != 64 or not result.get("timezone_data")
+        or not result.get("native_update_ui")
     ):
         raise RuntimeError(f"frozen manager self-test failed: {result}")
     manifest = {

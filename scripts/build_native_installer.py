@@ -58,11 +58,11 @@ def _iscc(candidate: Path | None) -> Path:
     command = shutil.which("ISCC.exe") or shutil.which("ISCC")
     local_app_data = os.environ.get("LOCALAPPDATA")
     candidates = (
-        Path(command) if command else None,
         Path(local_app_data) / "Programs" / "Inno Setup 7" / "ISCC.exe"
         if local_app_data else None,
         Path(r"C:\Program Files (x86)\Inno Setup 7\ISCC.exe"),
         Path(r"C:\Program Files\Inno Setup 7\ISCC.exe"),
+        Path(command) if command else None,
     )
     for path in candidates:
         if path is not None and path.is_file():
@@ -84,6 +84,23 @@ def _definition(name: str, value: str | Path) -> str:
     if any(char in text for char in ('\n', '\r', '"')):
         raise ValueError(f"{name} 包含不允许的字符。")
     return f"/D{name}={text}"
+
+
+def build_update_ui(output: Path, *, root: Path = ROOT) -> Path:
+    """Compile the display-only mode before freezing it into the manager."""
+    output = output.resolve()
+    if (root / "artifacts").resolve() not in output.parents:
+        raise ValueError("更新窗口输出必须位于 artifacts 目录内。")
+    output.mkdir(parents=True, exist_ok=True)
+    version = str(tomllib.loads((root / "pyproject.toml").read_text("utf-8"))["project"]["version"])
+    subprocess.run([
+        str(_iscc(None)), _definition("AppVersion", version), "/DUpdateUI",
+        f"/O{output}", str(root / "installer/WeChatReBot.iss"),
+    ], cwd=root, check=True)
+    executable = output / "WeChatReBot-UpdateUI.exe"
+    if not executable.is_file():
+        raise RuntimeError("Inno Setup 未生成自动更新窗口。")
+    return executable
 
 
 def command_for(args: argparse.Namespace, *, require_compiler: bool) -> tuple[list[str], dict[str, object]]:

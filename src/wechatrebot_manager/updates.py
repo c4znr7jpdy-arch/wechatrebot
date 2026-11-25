@@ -709,7 +709,6 @@ def create_update_plan(
     verified = verify_payload(prepared.payload_root)
     if (prepared.payload_root.parent / "payload-consumed.json").exists():
         raise UpdateError("上次安装已使用暂存文件，请重新准备更新；已下载的包会保留。")
-    automatic_install = automatic_install and verified.manifest.get("schema_version") == 1
     _validate_selected_package(prepared.release, verified.manifest)
     _validate_update_baseline(prepared.payload_root, root)
     source_executable = Path(executable or sys.executable).expanduser().resolve()
@@ -742,7 +741,7 @@ def create_update_plan(
             # the installed recovery capability from its own version.
             "rollback_journal_schema": 2,
             "automatic_install": 1 if automatic_install else 0,
-            "consume_prepared_payload": automatic_install,
+            "consume_prepared_payload": automatic_install and verified.manifest.get("schema_version") == 1,
             "install_root": str(root),
             "payload_root": str(prepared.payload_root.resolve()),
             "target_executable": str(root / "manager" / "WeChatReBot.exe"),
@@ -1208,6 +1207,7 @@ def apply_update_plan(
             version=version,
             verified_payload=verified,
             move_existing=move_existing,
+            progress_callback=progress_callback,
         )
         journal_path = root / "updates" / UPDATE_JOURNAL_FILE
         write_json_atomic(journal_path, journal)
@@ -1244,8 +1244,8 @@ def apply_update_plan(
                         "seconds": round(time.monotonic() - phase_started, 3),
                     },
                 )
-                if progress_callback:
-                    progress_callback(phase, completed, total)
+            if progress_callback:
+                progress_callback(phase, completed, total)
 
         if consume_prepared:
             # Retry reconstructs the extracted tree from the retained archive.

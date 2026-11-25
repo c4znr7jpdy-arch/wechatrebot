@@ -10,8 +10,8 @@ import uuid
 from .install_paths import INSTALL_MARKER
 from .json_io import write_json_atomic
 from .payload import (
-    COPY_BACKUP_PATHS, PayloadError, VerifiedPayload, _checked_target, _is_user_config,
-    _replace_file, _valid_digest, payload_relative_paths, payload_removed_paths,
+    COPY_BACKUP_PATHS, PayloadError, VerifiedPayload, ProgressCallback, _checked_target, _is_user_config,
+    _manifest_specs, _replace_file, _valid_digest, payload_relative_paths, payload_removed_paths,
     sha256_file,
 )
 from .update_errors import UpdateFailure
@@ -23,9 +23,15 @@ from .update_manifest import UpdateError
 CONTROL_FILES = frozenset({Path(INSTALL_MARKER), Path("config/installed-payload.json")})
 
 
-def update_target_paths(payload_root: Path) -> set[Path]:
-    paths = set(payload_relative_paths(payload_root))
-    paths.update(payload_removed_paths(payload_root))
+def update_target_paths(payload_root: Path, verified: VerifiedPayload | None = None) -> set[Path]:
+    if verified is None:
+        paths = set(payload_relative_paths(payload_root))
+        paths.update(payload_removed_paths(payload_root))
+    else:
+        if verified.root != payload_root.resolve():
+            raise UpdateError("已校验载荷与回滚来源不匹配。")
+        paths = {item.relative_path for item in verified.files}
+        paths.update(relative for relative, _digest in _manifest_specs(verified.manifest)[1])
     if Path("manager/WeChatReBot.exe") in paths:
         paths.update({Path("启动机器人.exe"), Path("卸载机器人.exe")})
     paths.update(CONTROL_FILES)
@@ -41,6 +47,7 @@ def snapshot_update_targets(
     version: str,
     verified_payload: VerifiedPayload | None = None,
     move_existing: bool = True,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, object]:
     """Plan before mutation; the caller must persist this journal before retain."""
     incoming_hashes = (
@@ -50,8 +57,12 @@ def snapshot_update_targets(
     (rollback_root / "files").mkdir(parents=True, exist_ok=True)
     snapshots: list[dict[str, object]] = []
     unchanged: dict[str, str] = {}
-    paths = update_target_paths(payload_root)
+    paths = update_target_paths(payload_root, verified_payload)
+    if progress_callback:
+        progress_callback("backup", 0, len(paths))
     for index, relative in enumerate(sorted(paths, key=lambda item: item.as_posix().casefold())):
+        if progress_callback:
+            progress_callback("backup", index, len(paths))
         target = _checked_target(install_root, relative)
         if _is_user_config(relative) and target.is_file():
             continue
@@ -73,6 +84,8 @@ def snapshot_update_targets(
             "path": relative.as_posix(), "existed": exists,
             "backup": backup_relative, "sha256": digest, "backup_mode": mode,
         })
+    if progress_callback:
+        progress_callback("backup", len(paths), len(paths))
     return {
         "schema_version": 2 if move_existing else 1,
         "update_id": update_id, "version": version,
