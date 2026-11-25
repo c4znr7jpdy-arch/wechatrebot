@@ -102,6 +102,13 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: release/build-requirements.lock
+      - name: Install Inno Setup for the bundled update window
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $setup
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash -ne '8A5A6711C3766A6E5FB74F280BA0E3551E719CE94538D901FDBD1F8F9920B3F0') { throw 'Inno Setup checksum mismatch' }
+          $installer = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER' -Wait -PassThru -WindowStyle Hidden
+          if ($installer.ExitCode -ne 0) { throw "Inno Setup installation failed: $($installer.ExitCode)" }
       - name: Build and self-test frozen Windows manager
         run: python scripts/build_manager.py --output artifacts/ci-manager
 

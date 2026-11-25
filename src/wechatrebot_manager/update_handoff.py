@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 import time
 
@@ -109,4 +110,7 @@ def run_automatic_update(plan_path: Path) -> int:
             raise RuntimeError(message)
         return code
 
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        from .native_update_progress import run_native_update_progress
+        return run_native_update_progress(operation)
     return run_update_progress(operation)

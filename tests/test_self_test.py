@@ -24,6 +24,16 @@ def test_manager_self_test_includes_unified_ui_assets(monkeypatch, tmp_path) -> 
     assert json.loads(target.read_text(encoding="utf-8")) == result
 
 
+def test_frozen_self_test_rejects_missing_native_update_window(monkeypatch, tmp_path):
+    from wechatrebot_manager import native_update_progress
+    monkeypatch.setattr(self_test.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(self_test.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(native_update_progress, "native_progress_executable", lambda: tmp_path / "missing.exe")
+    result = manager_self_test(tmp_path / "self-test.json")
+    assert result["native_update_ui"] is False
+    assert result["ok"] is False
+
+
 @pytest.mark.parametrize("missing", [
     "scheduled-tasks.js", "features.js", "preview.js", "model-services.js", "model-service-tests.js",
     "runtime-alerts.js", "runtime-alerts.css", "runtime-environment.js",

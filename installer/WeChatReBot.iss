@@ -2,18 +2,20 @@
   #error AppVersion is required
 #endif
 
-#ifndef ManagerExe
-  #error ManagerExe is required
-#endif
-
-#ifdef PayloadUrl
-  #ifndef PayloadSHA256
-    #error PayloadSHA256 is required for an online installer
+#ifndef UpdateUI
+  #ifndef ManagerExe
+    #error ManagerExe is required
   #endif
-  #define OnlinePayload
-#else
-  #ifndef PayloadArchive
-    #error PayloadArchive is required for an offline installer
+
+  #ifdef PayloadUrl
+    #ifndef PayloadSHA256
+      #error PayloadSHA256 is required for an online installer
+    #endif
+    #define OnlinePayload
+  #else
+    #ifndef PayloadArchive
+      #error PayloadArchive is required for an offline installer
+    #endif
   #endif
 #endif
 
@@ -42,16 +44,34 @@ VersionInfoVersion={#AppVersion}
 VersionInfoCompany={#ProductPublisher}
 VersionInfoDescription={#ProductName} 标准安装程序
 VersionInfoProductName={#ProductName}
+#ifdef UpdateUI
+DefaultDirName={tmp}
+CreateAppDir=no
+UsePreviousAppDir=no
+UsePreviousPrivileges=no
+PrivilegesRequired=lowest
+DisableWelcomePage=yes
+DisableDirPage=yes
+DisableReadyPage=yes
+DisableProgramGroupPage=yes
+Uninstallable=no
+CreateUninstallRegKey=no
+CloseApplications=no
+RestartApplications=no
+OutputBaseFilename=WeChatReBot-UpdateUI
+#else
 DefaultDirName={code:DefaultInstallDirectory}
 DefaultGroupName={#ProductName}
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UsePreviousPrivileges=yes
+#endif
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupArchitecture=x64
 MinVersion=10.0.17763
 WizardStyle=modern
+#ifndef UpdateUI
 DisableWelcomePage=no
 DisableReadyPage=no
 DisableProgramGroupPage=auto
@@ -61,7 +81,9 @@ CloseApplications=yes
 RestartApplications=no
 SetupMutex=WeChatReBotSetupMutex
 AppMutex=WeChatReBotManagerMutex
+#endif
 SetupIconFile=..\src\wechatrebot_manager\app_webui\assets\app-icon.ico
+#ifndef UpdateUI
 UninstallDisplayIcon={app}\manager\WeChatReBot.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -71,10 +93,15 @@ CreateUninstallRegKey=yes
 Uninstallable=yes
 UninstallDisplayName={#ProductName}
 ChangesEnvironment=no
+#endif
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
+#ifdef UpdateUI
+[Code]
+#include "update-progress.iss"
+#else
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项："; Flags: unchecked
 
@@ -111,6 +138,7 @@ begin
   Result := '';
   RegQueryStringValue(Root, Key, 'InstallLocation', Result);
 end;
+
 function DefaultInstallDirectory(Param: String): String;
 begin
   Result := RegistryInstallLocation(HKEY_CURRENT_USER, NativeUninstallKey);
@@ -302,3 +330,4 @@ begin
   if not Result then
     SuppressibleMsgBox('卸载前检查失败，为保护现有数据，已停止卸载。', mbError, MB_OK, IDOK);
 end;
+#endif

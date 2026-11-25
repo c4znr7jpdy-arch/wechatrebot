@@ -1,5 +1,25 @@
 # 完整更新等待时间优化
 
+## 2026-11-24：复用原生安装窗口与减少重复 I/O
+
+下一待发布版本为 1.0.30，基于线上 1.0.29；本次只变更管理器及其构建，不执行正式打包或发布。以下更新取代本文早期记录中的生产 Tk 窗口方案：
+
+- `installer/WeChatReBot.iss` 增加只显示进度的 `UpdateUI` 编译模式，共用原生安装器的样式、语言和品牌资源，随管理器一起嵌入分发。
+- `native_update_progress.py` 通过随机任务标识和可见回执确认窗口已就绪，之后才进入既有 ready/commit/committed 交接。UI 不拥有文件事务，退出、错误提示或进度文件写入失败均不能启动第二次安装；窗口启动失败则不进入事务。主更新进程异常退出时，窗口明确显示“尚未确认完成”。
+- 完整包、管理器包和组件增量共用可见交接；组件增量继续使用原有文件级安装与精确基线校验，不转成完整包。
+- 自动更新事务的备份准备、路径检查、安装前复核均报告文件数，界面显示阶段百分比、阶段耗时和总耗时；首次配置向导的进度回调保持原契约。进度文件每 250 ms 最多更新一次，阶段切换和最终结果立即写入。
+- 更新下载日志对同一阶段和百分比去重，36,159 个文件的单次校验只写 11 条进度记录。回滚准备复用当前事务已经校验的清单；目标路径以一次 `lstat` 同时识别符号链接与目录联接，仍逐级检查边界，并保留源文件、目标文件的内容校验和漂移检测。
+
+本机临时夹具对 1,800 个文件重复测量三次，目标路径检查中位耗时由 2.1519 秒降至 1.3777 秒（减少 36.0%）。这只是路径检查阶段的合成对比，不是完整升级提速比例。真实微信、实际完整升级和安全软件影响仍需用户验收。旧管理器发起的首次升级仍使用它已有的更新器，升级到新管理器后才使用内嵌 Inno 窗口。
+
+原生窗口的可见交接、失败提示、完成自动关闭，以及更新中断恢复和配置保留通过临时夹具验证；不启动机器人。自动验证通过定向 pytest 和 Inno 编译完成。
+
+本次本地回归执行 `python -m pytest -q`，范围为 `test_native_update_progress`、`test_build_manager`、`test_build_native_installer`、`test_self_test`、`test_unchanged_update_targets`、`test_update_move_rollback`、`test_automatic_update`、`test_update_progress`、`test_payload`、`test_updates`、`test_app_shell`、`test_update_close_recovery`、`test_update_restart_processes`、`test_installer`、`test_native_setup`、`test_local_incremental_update`、`test_component_update_manifest`：582 passed。随后补充冻结资源缺失检查和真实 Inno 夹具，后者连续三次完成交接、临时文件更新、启动回执及自动关闭，且断言未强制结束窗口：3 passed in 5.21s。Inno 两种编译模式、`python scripts/validate_release_metadata.py`、改动模块 `compileall` 和 `git diff --check` 通过。以上不替代发布、真实完整升级或安全软件验收。
+
+进度回调兼容修正后重跑 `tests/test_payload.py tests/test_installer.py tests/test_unchanged_update_targets.py tests/test_native_update_progress.py`：95 passed，3 个原生编译夹具用例在不提供可执行文件时跳过；这些用例已在上面的独立原生测试中执行。
+
+## 早期实现记录
+
 2026-11-19。基线为 `master a59fe2f`，线上版本为 1.0.24；本次开发供下一待发布候选使用（当前为 1.0.25）。修改管理器内的安装/更新代码，可通过管理器增量交付，不涉及 Python、依赖锁或原生文件重建。本记录不代表已打包、安装或上线。
 
 ## 目标与实施顺序
