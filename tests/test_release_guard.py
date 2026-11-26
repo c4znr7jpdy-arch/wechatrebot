@@ -41,7 +41,8 @@ def test_guard_accepts_only_declared_content_service_credentials(tmp_path, prefi
     assert "1234567890" not in str(findings)
 
 
-@pytest.mark.parametrize("data", [b"\xff\xfe", b" " * (4 * 1024 * 1024) + b"{"])
+@pytest.mark.parametrize("data", [b"\xff\xfe", b" " * (4 * 1024 * 1024) + b"{"],
+                         ids=["invalid-utf8", "oversized-json"])
 def test_guard_checks_content_defaults_before_generic_text_skips(tmp_path, data):
     path = tmp_path / "config/templates/content-services.json"
     path.parent.mkdir(parents=True)

@@ -25,6 +25,7 @@ from .update_api import UpdateApiMixin
 from .runtime_api import RuntimeApiMixin
 from .chat_history import ChatHistoryService
 from .contact_directory import ContactDirectoryService
+from .content_services import apply_content_service_defaults
 from .group_directory import GroupDirectoryService, GroupDirectoryError
 from .customer_config import (
     ProviderService,
@@ -202,6 +203,7 @@ class ApplicationApi(ActivityApiMixin, LicensingApiMixin, ChatApiMixin, Schedule
     def __init__(self, install_root: str | Path, *, development: bool = False) -> None:
         self._development = development
         self._install_root = Path(install_root).expanduser().resolve()
+        apply_content_service_defaults(self._install_root)
         self._update_logger = UpdateLogger(self._install_root)
         self._startup_update_id = os.environ.get("WECHATREBOT_UPDATE_ID", "").strip()
         self._startup_update_from = os.environ.get("WECHATREBOT_UPDATE_FROM", "").strip()

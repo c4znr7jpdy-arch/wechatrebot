@@ -88,3 +88,24 @@ def test_corrupt_customer_config_is_preserved(tmp_path):
     with pytest.raises(ValueError):
         apply_content_service_defaults(tmp_path)
     assert path.read_text("utf-8") == "{"
+
+
+def test_manager_reopen_fills_existing_empty_config_before_loading_runtime(tmp_path, monkeypatch):
+    from wechatrebot_manager import app_shell
+
+    write_json_atomic(tmp_path / CONTENT_SERVICE_TEMPLATE, DEFAULTS)
+    config = tmp_path / CONTENT_SERVICE_CONFIG
+    write_json_atomic(config, dict.fromkeys(DEFAULTS, ""))
+
+    class RuntimeInitializationReached(Exception):
+        pass
+
+    def lifecycle(_root):
+        assert json.loads(config.read_text("utf-8")) == DEFAULTS
+        raise RuntimeInitializationReached
+
+    # Observe the configuration before runtime construction, without starting
+    # services or reading a real installation.
+    monkeypatch.setattr(app_shell, "LifecycleController", lifecycle)
+    with pytest.raises(RuntimeInitializationReached):
+        app_shell.ApplicationApi(tmp_path, development=True)
