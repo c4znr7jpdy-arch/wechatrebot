@@ -10,7 +10,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wechatrebot_manager.content_services import (
-    CONTENT_SERVICE_FIELDS, CONTENT_SERVICE_TEMPLATE, read_content_service_defaults,
+    CONTENT_SERVICE_TEMPLATE, read_content_service_defaults,
 )
 
 
@@ -138,21 +138,21 @@ def scan_release(root: Path) -> list[dict[str, str]]:
             # fingerprint. Their sources can legitimately contain example tokens,
             # test fixtures, port-like numbers, or package data directories.
             continue
+        if _distribution_relative_parts(relative) == CONTENT_SERVICE_TEMPLATE.parts:
+            # This exact template deliberately distributes the publisher's
+            # three credentials. Validate it even when generic text scanning
+            # would skip a large file or an unsupported text encoding.
+            try:
+                read_content_service_defaults(path)
+            except ValueError:
+                findings.append({"path": relative.as_posix(), "reason": "invalid-content-service-defaults"})
+            continue
         if path.stat().st_size > 4 * 1024 * 1024:
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if _distribution_relative_parts(relative) == CONTENT_SERVICE_TEMPLATE.parts:
-            try:
-                read_content_service_defaults(path)
-            except ValueError:
-                findings.append({"path": relative.as_posix(), "reason": "invalid-content-service-defaults"})
-            else:
-                # This template deliberately distributes the publisher's content
-                # credentials. Other fields and all other paths remain scanned.
-                text = json.dumps({key: "" for key in CONTENT_SERVICE_FIELDS})
         if path.name.casefold() == "release-manifest.json":
             try:
                 manifest = json.loads(text)

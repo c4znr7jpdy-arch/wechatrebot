@@ -38,8 +38,18 @@ def test_guard_accepts_only_declared_content_service_credentials(tmp_path, prefi
     path.write_text(json.dumps({**defaults, "api_key": "unrelated-secret-1234567890"}), encoding="utf-8")
     findings = scan(tmp_path)
     assert any(item["reason"] == "invalid-content-service-defaults" for item in findings)
-    assert any(item["reason"] == "assigned-secret" for item in findings)
     assert "1234567890" not in str(findings)
+
+
+@pytest.mark.parametrize("data", [b"\xff\xfe", b" " * (4 * 1024 * 1024) + b"{"])
+def test_guard_checks_content_defaults_before_generic_text_skips(tmp_path, data):
+    path = tmp_path / "config/templates/content-services.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(data)
+    assert _load_guard()(tmp_path) == [{
+        "path": "config/templates/content-services.json",
+        "reason": "invalid-content-service-defaults",
+    }]
 
 
 def test_guard_accepts_shipped_license_runtime_guard(tmp_path: Path) -> None:
