@@ -21,6 +21,13 @@ def _builder():
     return module
 
 
+def _write_content_defaults(commercial: Path, defaults: dict) -> Path:
+    path = commercial / "config/local/content-services.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(defaults), encoding="utf-8")
+    return path
+
+
 def _runtime_manifest(commercial: Path, runtime: Path) -> dict[str, object]:
     wheelhouse = json.loads(
         (commercial / "release" / "runtime-wheelhouse.json").read_text(
@@ -292,6 +299,12 @@ def test_staging_copies_bundled_ffmpeg_and_records_it(
     commercial = tmp_path / "commercial"
     source = vendor_inputs(commercial)
     output = commercial / "artifacts" / "staging"
+    content_defaults = {
+        "content_api_id": "test-content-id",
+        "content_api_key": "test-content-key",
+        "weather_detail_token": "test-weather-token",
+    }
+    _write_content_defaults(commercial, content_defaults)
     runtime = tmp_path / "runtime"
     (commercial / "release").mkdir(parents=True)
     (commercial / "release" / "source-manifest.json").write_text(
@@ -350,6 +363,71 @@ def test_staging_copies_bundled_ffmpeg_and_records_it(
         (output / "release-manifest.json").read_text(encoding="utf-8")
     )
     assert release_manifest["runtime"]["ffmpeg"] == runtime_manifest["ffmpeg"]
+    target = module.CONTENT_SERVICE_TEMPLATE
+    assert json.loads((output / target).read_text(encoding="utf-8")) == content_defaults
+    assert {"target": target.as_posix()} in release_manifest["copied"]
+    assert {
+        "path": target.as_posix(),
+        "sha256": hashlib.sha256((output / target).read_bytes()).hexdigest().upper(),
+    } in release_manifest["files"]
+    manifest_text = json.dumps(release_manifest)
+    assert "config/local" not in manifest_text
+    assert all(value not in manifest_text for value in content_defaults.values())
+
+
+def test_staging_finds_content_defaults_from_a_linked_worktree(tmp_path: Path) -> None:
+    module = _builder()
+    primary = tmp_path / "主工作树 primary"
+    worktree = tmp_path / "关联工作树 linked"
+    output = tmp_path / "staging"
+    primary.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=primary, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "--allow-empty", "--quiet", "-m", "Initial commit",
+        ],
+        cwd=primary,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "--detach", str(worktree)],
+        cwd=primary,
+        check=True,
+    )
+    assert module._stage_content_service_defaults(worktree, output) is None
+
+    defaults = {
+        "content_api_id": "test-content-id",
+        "content_api_key": "test-content-key",
+        "weather_detail_token": "test-weather-token",
+    }
+    source = _write_content_defaults(primary, defaults)
+    target = output / module.CONTENT_SERVICE_TEMPLATE
+    assert module._content_service_defaults_source(worktree) == source
+    assert module._stage_content_service_defaults(worktree, output) == target
+    assert json.loads(target.read_text(encoding="utf-8")) == defaults
+
+
+def test_staging_invalid_content_defaults_omit_credential_values(tmp_path: Path) -> None:
+    module = _builder()
+    commercial = tmp_path / "commercial"
+    output = tmp_path / "staging"
+    sample_key = "test-invalid-content-key"
+    _write_content_defaults(commercial, {"content_api_key": sample_key})
+
+    with pytest.raises(ValueError) as exc:
+        module._stage_content_service_defaults(commercial, output)
+
+    assert sample_key not in str(exc.value)
+    assert not (output / module.CONTENT_SERVICE_TEMPLATE).exists()
+
+
+def test_customer_staging_requires_content_defaults(tmp_path, monkeypatch):
+    module = _builder()
+    monkeypatch.setattr(module, "_content_service_defaults_source", lambda _root: None)
+    with pytest.raises(ValueError, match="content-services.json"):
+        module._stage_content_service_defaults(tmp_path, tmp_path / "staging", required=True)
 
 
 def test_staging_manager_pe_check_rejects_plain_file(tmp_path: Path) -> None:

@@ -1,4 +1,7 @@
 from pathlib import Path
+import json
+
+import pytest
 
 
 def _load_guard():
@@ -13,6 +16,30 @@ def test_guard_accepts_clean_release(tmp_path: Path) -> None:
     (tmp_path / "app" / "main.py").write_text("print('ok')\n", encoding="utf-8")
     findings = _load_guard()(tmp_path)
     assert findings == []
+
+
+@pytest.mark.parametrize("prefix", ["", "payload/"])
+def test_guard_accepts_only_declared_content_service_credentials(tmp_path, prefix):
+    path = tmp_path / prefix / "config/templates/content-services.json"
+    path.parent.mkdir(parents=True)
+    defaults = {"content_api_id": "publisher-account",
+                "content_api_key": "publisher-credential-1234567890",
+                "weather_detail_token": "publisher-weather-1234567890"}
+    path.write_text(json.dumps(defaults), encoding="utf-8")
+    scan = _load_guard()
+    assert scan(tmp_path) == []
+
+    elsewhere = tmp_path / "other.json"
+    elsewhere.write_text(json.dumps(defaults), encoding="utf-8")
+    assert any(item["path"] == "other.json" and item["reason"] == "assigned-secret"
+               for item in scan(tmp_path))
+    elsewhere.unlink()
+
+    path.write_text(json.dumps({**defaults, "api_key": "unrelated-secret-1234567890"}), encoding="utf-8")
+    findings = scan(tmp_path)
+    assert any(item["reason"] == "invalid-content-service-defaults" for item in findings)
+    assert any(item["reason"] == "assigned-secret" for item in findings)
+    assert "1234567890" not in str(findings)
 
 
 def test_guard_accepts_shipped_license_runtime_guard(tmp_path: Path) -> None:

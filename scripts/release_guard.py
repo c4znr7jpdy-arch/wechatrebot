@@ -3,7 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from wechatrebot_manager.content_services import (
+    CONTENT_SERVICE_FIELDS, CONTENT_SERVICE_TEMPLATE, read_content_service_defaults,
+)
 
 
 FORBIDDEN_PATH_PARTS = {
@@ -136,6 +144,15 @@ def scan_release(root: Path) -> list[dict[str, str]]:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        if _distribution_relative_parts(relative) == CONTENT_SERVICE_TEMPLATE.parts:
+            try:
+                read_content_service_defaults(path)
+            except ValueError:
+                findings.append({"path": relative.as_posix(), "reason": "invalid-content-service-defaults"})
+            else:
+                # This template deliberately distributes the publisher's content
+                # credentials. Other fields and all other paths remain scanned.
+                text = json.dumps({key: "" for key in CONTENT_SERVICE_FIELDS})
         if path.name.casefold() == "release-manifest.json":
             try:
                 manifest = json.loads(text)

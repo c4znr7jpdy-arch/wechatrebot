@@ -8,6 +8,7 @@ import secrets
 
 from .brand import BrandProfile
 from .config_lock import CONFIG_FILE_LOCK
+from .content_services import apply_content_service_defaults
 from .feature_policy import RETIRED_PLUGIN_MODULES, load_delivery_features
 from .json_io import write_json_atomic
 from .port_config import RuntimePorts, _load_object, load_runtime_ports
@@ -620,6 +621,7 @@ def _write_runtime_configs_locked(
     astrbot_data_root = astrbot_root / "data"
     astrbot_data_root.mkdir(parents=True, exist_ok=True)
     (astrbot_data_root / "config").mkdir(parents=True, exist_ok=True)
+    apply_content_service_defaults(root)
     purge_retired_plugins(root)
     (astrbot_root / ".astrbot").touch(exist_ok=True)
     astrbot_path = astrbot_data_root / "cmd_config.json"
