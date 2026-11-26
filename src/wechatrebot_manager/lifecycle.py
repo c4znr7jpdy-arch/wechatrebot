@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+import logging
 from pathlib import Path
 import threading
 from typing import Callable, Protocol
 
 from .diagnostics import collect_diagnostics, diagnostic_error_messages
+from .content_services import apply_content_service_defaults
 from .environment import (
     WechatEnvironment,
     configured_wechat_path,
@@ -119,6 +121,10 @@ class LifecycleController:
         license_client: LicenseClient | None = None,
     ) -> None:
         self.install_root = Path(install_root).expanduser().resolve()
+        try:
+            apply_content_service_defaults(self.install_root)
+        except (OSError, ValueError):
+            logging.getLogger(__name__).warning("热点与天气默认配置未能写入，请检查本机内容服务配置。")
         self.licenses = license_client or LicenseClient(self.install_root)
         self._environment_checker = environment_checker or (
             lambda root: inspect_wechat_environment(root)

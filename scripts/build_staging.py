@@ -23,6 +23,11 @@ from wechatrebot_manager.payload import LEGACY_READY_MANIFEST_STATUS
 from wechatrebot_manager import hook_recall_patch
 from build_runtime import CORE_ASTRBOT_PATCHES
 from source_inputs import verify_source_inputs
+from wechatrebot_manager.content_services import (
+    CONTENT_SERVICE_TEMPLATE,
+    read_content_service_defaults,
+)
+from wechatrebot_manager.json_io import write_json_atomic
 from wechatrebot_manager.licensing.bundle import validate_runtime_bundle
 
 
@@ -442,6 +447,44 @@ def _sanitize_project_source_credentials(output: Path) -> None:
                 )
 
 
+def _content_service_defaults_source(commercial_root: Path) -> Path | None:
+    relative = Path("config/local/content-services.json")
+    source = commercial_root / relative
+    if source.exists():
+        return source
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=commercial_root,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        return None
+    source = common_dir.parent / relative
+    return source if source.exists() else None
+
+
+def _stage_content_service_defaults(
+    commercial_root: Path, output: Path, *, required: bool = False,
+) -> Path | None:
+    source = _content_service_defaults_source(commercial_root)
+    if source is None:
+        if required:
+            raise ValueError("客户构建缺少 config/local/content-services.json 中的热点与天气默认配置。")
+        return None
+    target = output / CONTENT_SERVICE_TEMPLATE
+    write_json_atomic(target, read_content_service_defaults(source))
+    return target
+
+
 def _release_manifest(
     *,
     version: str,
@@ -651,6 +694,11 @@ def main(argv: list[str] | None = None) -> int:
     if (output / "app" / "bridge").is_dir():
         _apply_bridge_patch(commercial_root, output)
     _apply_plugin_patches(commercial_root, output)
+    content_defaults = _stage_content_service_defaults(
+        commercial_root, output, required=args.manager_exe is not None,
+    )
+    if content_defaults is not None:
+        copied.append(_copied_record(content_defaults, output))
 
     office_plugin = output / "app/astrbot/data/plugins/astrbot_plugin_office_assistant"
     if office_plugin.is_dir():
