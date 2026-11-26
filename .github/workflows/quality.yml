@@ -13,7 +13,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      manager: ${{ steps.plan.outputs.manager }}
+      browser: ${{ steps.plan.outputs.browser }}
+      player: ${{ steps.plan.outputs.player }}
+      frozen: ${{ steps.plan.outputs.frozen }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Select quality jobs
+        id: plan
+        env:
+          QUALITY_EVENT: ${{ github.event_name }}
+          QUALITY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          QUALITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/quality_ci.py plan
+
   manager:
+    needs: plan
+    if: needs.plan.outputs.manager == 'true'
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
@@ -47,23 +72,65 @@ jobs:
             artifacts/manager-bootstrap.json
             artifacts/history-queries.json
           if-no-files-found: ignore
-      - name: Install test browser
-        run: python -m playwright install chromium
       - name: Report plugin regression collection
         run: python -m pytest --collect-only -q runtime/astrbot_plugin_twitter/tests
       - name: Test manager and plugin contracts
-        run: python -m pytest -q -ra --ignore=tests/test_short_drama_player_controls.py --basetemp "${{ runner.temp }}/manager-tests" --junitxml "${{ runner.temp }}/manager-results.xml"
-      - name: Upload manager test results and browser failure evidence
+        run: python scripts/quality_ci.py run manager -q -ra --basetemp "${{ runner.temp }}/manager-tests" --junitxml "${{ runner.temp }}/manager-results.xml"
+      - name: Upload manager test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: manager-test-evidence
+          path: ${{ runner.temp }}/manager-results.xml
+          if-no-files-found: ignore
+
+  browser:
+    needs: plan
+    if: needs.plan.outputs.browser == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/playwright-browsers
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml') }}
+      - name: Install test browser
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: python -m playwright install chromium
+      - name: Test manager browser interactions
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: python scripts/quality_ci.py run browser-${{ matrix.shard }} -q -ra --basetemp "${{ runner.temp }}/browser-${{ matrix.shard }}-tests" --junitxml "${{ runner.temp }}/browser-${{ matrix.shard }}-results.xml"
+      - name: Upload browser test results and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-browser-${{ matrix.shard }}-evidence
           path: |
-            ${{ runner.temp }}/manager-results.xml
-            ${{ runner.temp }}/manager-tests/**/browser-failure/**
+            ${{ runner.temp }}/browser-${{ matrix.shard }}-results.xml
+            ${{ runner.temp }}/browser-${{ matrix.shard }}-tests/**/browser-failure/**
           if-no-files-found: ignore
 
   player:
+    needs: plan
+    if: needs.plan.outputs.player == 'true'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -78,10 +145,19 @@ jobs:
           node-version: "22"
       - name: Install test dependencies
         run: python -m pip install -e ".[test]"
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/playwright-browsers
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml') }}
       - name: Install test browser
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: python -m playwright install chromium
       - name: Test player browser controls
-        run: python -m pytest -q -ra tests/test_short_drama_player_controls.py --basetemp "${{ runner.temp }}/player-browser" --junitxml "${{ runner.temp }}/player-browser-results.xml"
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: python scripts/quality_ci.py run player -q -ra --basetemp "${{ runner.temp }}/player-browser" --junitxml "${{ runner.temp }}/player-browser-results.xml"
       - name: Upload player browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -93,6 +169,8 @@ jobs:
           if-no-files-found: ignore
 
   frozen-manager:
+    needs: plan
+    if: needs.plan.outputs.frozen == 'true'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -112,20 +190,18 @@ jobs:
       - name: Build and self-test frozen Windows manager
         run: python scripts/build_manager.py --output artifacts/ci-manager
 
-  # Preserve the existing required check name while every independent job runs.
+  # Preserve the existing required check name and reject unexpected skipped jobs.
   test:
-    needs: [manager, player, frozen-manager]
+    needs: [plan, manager, browser, player, frozen-manager]
     if: always()
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every quality job to succeed
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Require every selected quality job to succeed
         env:
           QUALITY_RESULTS: ${{ toJSON(needs) }}
-        run: |
-          $results = $env:QUALITY_RESULTS | ConvertFrom-Json
-          $failed = @($results.PSObject.Properties | Where-Object { $_.Value.result -ne 'success' })
-          if ($failed.Count -gt 0) {
-            $failed | ForEach-Object { Write-Output "$($_.Name): $($_.Value.result)" }
-            exit 1
-          }
+        run: python scripts/quality_ci.py gate
