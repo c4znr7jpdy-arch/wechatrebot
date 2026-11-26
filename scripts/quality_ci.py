@@ -19,8 +19,14 @@ PLAYER_TESTS = frozenset({
     "tests/test_short_drama_recommendation_ratio.py",
     "tests/test_short_drama_search_interactions.py",
 })
-JOB_FLAGS = {"manager": "manager", "browser": "browser", "player": "player", "frozen-manager": "frozen"}
-FULL = tuple(JOB_FLAGS.values())
+JOB_FLAGS = {
+    "manager": "manager",
+    "browser-1": "browser",
+    "browser-2": "browser",
+    "player": "player",
+    "frozen-manager": "frozen",
+}
+FULL = tuple(dict.fromkeys(JOB_FLAGS.values()))
 PLAYER_ONLY = ("player",)
 DOCS_ONLY = ()
 BROWSER_MODULES = {"playwright", "pytest_playwright", "selenium", "pyppeteer"}
@@ -205,7 +211,7 @@ def _plan(root: Path, environment: dict[str, str]) -> None:
         raise ValueError("A changed player test is missing from the player quality job")
     print("Quality jobs:", ", ".join(enabled) or "documentation only")
     with Path(environment["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-        for flag in JOB_FLAGS.values():
+        for flag in FULL:
             print(f"{flag}={str(flag in enabled).lower()}", file=output)
 
 
@@ -213,9 +219,9 @@ def gate_errors(results: dict) -> list[str]:
     if set(results) != {"plan", *JOB_FLAGS} or results["plan"].get("result") != "success":
         return ["Quality plan failed or the workflow job results are incomplete."]
     outputs = results["plan"].get("outputs", {})
-    if any(outputs.get(flag) not in {"true", "false"} for flag in JOB_FLAGS.values()):
+    if any(outputs.get(flag) not in {"true", "false"} for flag in FULL):
         return ["Quality plan did not set every job flag."]
-    enabled = tuple(flag for flag in JOB_FLAGS.values() if outputs[flag] == "true")
+    enabled = tuple(flag for flag in FULL if outputs[flag] == "true")
     if enabled not in {FULL, PLAYER_ONLY, DOCS_ONLY}:
         return ["Quality plan produced an unsupported job selection."]
 

@@ -84,89 +84,32 @@ jobs:
           path: ${{ runner.temp }}/manager-results.xml
           if-no-files-found: ignore
 
-  browser:
+  browser-1:
     needs: plan
     if: needs.plan.outputs.browser == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Install test dependencies
-        run: python -m pip install -e ".[test]"
-      - name: Cache Chromium
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/playwright-browsers
-          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml') }}
-      - name: Install test browser
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
-        run: python -m playwright install chromium
-      - name: Test manager browser interactions
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
-        run: python scripts/quality_ci.py run browser-${{ matrix.shard }} -q -ra --basetemp "${{ runner.temp }}/browser-${{ matrix.shard }}-tests" --junitxml "${{ runner.temp }}/browser-${{ matrix.shard }}-results.xml"
-      - name: Upload browser test results and failure evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: manager-browser-${{ matrix.shard }}-evidence
-          path: |
-            ${{ runner.temp }}/browser-${{ matrix.shard }}-results.xml
-            ${{ runner.temp }}/browser-${{ matrix.shard }}-tests/**/browser-failure/**
-          if-no-files-found: ignore
+    uses: ./.github/workflows/quality-browser.yml
+    with:
+      group: browser-1
+      artifact: manager-browser-1-evidence
+      timeout: 35
+
+  browser-2:
+    needs: plan
+    if: needs.plan.outputs.browser == 'true'
+    uses: ./.github/workflows/quality-browser.yml
+    with:
+      group: browser-2
+      artifact: manager-browser-2-evidence
+      timeout: 35
 
   player:
     needs: plan
     if: needs.plan.outputs.player == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Install test dependencies
-        run: python -m pip install -e ".[test]"
-      - name: Cache Chromium
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/playwright-browsers
-          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml') }}
-      - name: Install test browser
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
-        run: python -m playwright install chromium
-      - name: Test player browser controls
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
-        run: python scripts/quality_ci.py run player -q -ra --basetemp "${{ runner.temp }}/player-browser" --junitxml "${{ runner.temp }}/player-browser-results.xml"
-      - name: Upload player browser evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: player-browser-evidence
-          path: |
-            ${{ runner.temp }}/player-browser/**/*.png
-            ${{ runner.temp }}/player-browser-results.xml
-          if-no-files-found: ignore
+    uses: ./.github/workflows/quality-browser.yml
+    with:
+      group: player
+      artifact: player-browser-evidence
+      timeout: 25
 
   frozen-manager:
     needs: plan
@@ -192,7 +135,7 @@ jobs:
 
   # Preserve the existing required check name and reject unexpected skipped jobs.
   test:
-    needs: [plan, manager, browser, player, frozen-manager]
+    needs: [plan, manager, browser-1, browser-2, player, frozen-manager]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

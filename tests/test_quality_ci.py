@@ -97,7 +97,7 @@ def _results(enabled):
     return {
         "plan": {
             "result": "success",
-            "outputs": {flag: str(flag in enabled).lower() for flag in quality.JOB_FLAGS.values()},
+            "outputs": {flag: str(flag in enabled).lower() for flag in quality.FULL},
         },
         **{
             job: {"result": "success" if flag in enabled else "skipped"}
@@ -112,12 +112,18 @@ def test_quality_gate_accepts_matching_outcomes(enabled):
 
 
 @pytest.mark.parametrize(("enabled", "job", "outcome"), [
-    (quality.FULL, "browser", "failure"),
+    (quality.FULL, "browser-1", "failure"),
+    (quality.FULL, "browser-1", "cancelled"),
+    (quality.FULL, "browser-1", "skipped"),
+    (quality.FULL, "browser-2", "failure"),
+    (quality.FULL, "browser-2", "cancelled"),
+    (quality.FULL, "browser-2", "skipped"),
     (quality.FULL, "manager", "cancelled"),
     (quality.FULL, "frozen-manager", "skipped"),
     (quality.DOCS_ONLY, "manager", "failure"),
     (quality.PLAYER_ONLY, "player", "skipped"),
-    (quality.PLAYER_ONLY, "browser", "success"),
+    (quality.PLAYER_ONLY, "browser-1", "success"),
+    (quality.PLAYER_ONLY, "browser-2", "success"),
 ])
 def test_quality_gate_rejects_unexpected_outcomes(enabled, job, outcome):
     results = _results(enabled)
@@ -132,7 +138,7 @@ def test_quality_gate_requires_a_valid_successful_plan():
     assert quality.gate_errors(results)
 
     results = _results(quality.DOCS_ONLY)
-    del results["browser"]
+    del results["browser-1"]
     assert quality.gate_errors(results)
 
     results = _results(quality.DOCS_ONLY)
