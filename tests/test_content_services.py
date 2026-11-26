@@ -90,8 +90,9 @@ def test_corrupt_customer_config_is_preserved(tmp_path):
     assert path.read_text("utf-8") == "{"
 
 
-def test_manager_reopen_fills_existing_empty_config_before_loading_runtime(tmp_path, monkeypatch):
-    from wechatrebot_manager import app_shell
+@pytest.mark.parametrize("entry", ["manager", "cli"])
+def test_reopening_fills_existing_empty_config_before_loading_runtime(tmp_path, monkeypatch, entry):
+    from wechatrebot_manager import app_shell, lifecycle
 
     write_json_atomic(tmp_path / CONTENT_SERVICE_TEMPLATE, DEFAULTS)
     config = tmp_path / CONTENT_SERVICE_CONFIG
@@ -100,12 +101,37 @@ def test_manager_reopen_fills_existing_empty_config_before_loading_runtime(tmp_p
     class RuntimeInitializationReached(Exception):
         pass
 
-    def lifecycle(_root):
+    def licenses(_root):
         assert json.loads(config.read_text("utf-8")) == DEFAULTS
         raise RuntimeInitializationReached
 
     # Observe the configuration before runtime construction, without starting
     # services or reading a real installation.
-    monkeypatch.setattr(app_shell, "LifecycleController", lifecycle)
+    monkeypatch.setattr(lifecycle, "LicenseClient", licenses)
+    with pytest.raises(RuntimeInitializationReached):
+        if entry == "manager":
+            app_shell.ApplicationApi(tmp_path, development=True)
+        else:
+            lifecycle.LifecycleController(tmp_path)
+
+
+def test_bad_optional_content_config_does_not_block_manager_construction(tmp_path, monkeypatch, caplog):
+    from wechatrebot_manager import app_shell, lifecycle
+
+    write_json_atomic(tmp_path / CONTENT_SERVICE_TEMPLATE, DEFAULTS)
+    config = tmp_path / CONTENT_SERVICE_CONFIG
+    config.parent.mkdir(parents=True)
+    config.write_text('{"content_api_key": "private-broken', encoding="utf-8")
+
+    class RuntimeInitializationReached(Exception):
+        pass
+
+    def licenses(_root):
+        raise RuntimeInitializationReached
+
+    monkeypatch.setattr(lifecycle, "LicenseClient", licenses)
     with pytest.raises(RuntimeInitializationReached):
         app_shell.ApplicationApi(tmp_path, development=True)
+    assert "默认配置未能写入" in caplog.text
+    assert "private-broken" not in caplog.text
+    assert config.read_text("utf-8") == '{"content_api_key": "private-broken'
