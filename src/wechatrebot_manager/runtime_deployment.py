@@ -8,8 +8,10 @@ import uuid
 from .install_paths import extended_windows_path
 from .json_io import write_json_atomic
 from .payload import (
-    PAYLOAD_MANIFEST, PayloadError, _checked_target, _is_runtime_user_data, _is_user_config,
-    _is_user_managed, _read_installed_manifest_for_merge, _safe_relative_path, sha256_file, verify_payload,
+    PAYLOAD_MANIFEST, PayloadError, VerifiedPayload, VerifiedPayloadFile, _checked_target,
+    _copy_and_hash, _is_runtime_user_data, _is_user_config, _is_user_managed, _manifest_specs,
+    _plan_payload, _read_installed_manifest_for_merge, _reuse_verified_payload_plan,
+    _safe_relative_path, sha256_file, verify_payload,
 )
 from .runtime_manifest import (
     ENVIRONMENT_JOURNAL, ENVIRONMENT_MANIFEST, ENVIRONMENT_RECEIPT, RuntimeEnvironment,
@@ -51,23 +53,24 @@ def package_installed(package: RuntimePackage, root: Path) -> bool:
 
 def missing_packages(environment: RuntimeEnvironment, root: Path, progress_callback=None) -> tuple[RuntimePackage, ...]:
     missing = []
+    total = len(environment.packages)
+    if progress_callback:
+        progress_callback("runtime_check", 0, total)
     for index, package in enumerate(environment.packages, 1):
         if not package_installed(package, root):
             missing.append(package)
         if progress_callback:
-            progress_callback("runtime_check", index, len(environment.packages))
+            progress_callback("runtime_check", index, total)
     return tuple(missing)
 
 
-def _copy(source: Path, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-
-
 def _download_packages(missing: tuple[RuntimePackage, ...], root: Path, staging: Path,
-                       channel: UpdateChannel, progress_callback=None) -> None:
+                       channel: UpdateChannel, progress_callback=None) -> list[VerifiedPayloadFile]:
     from .updates import extract_update_archive
 
+    staged_files = []
+    if not missing:
+        return staged_files
     total, completed = sum(package.size for package in missing), 0
     cache = _checked_target(root, Path("cache/runtime-packages"), allow_directory=True)
     cache.mkdir(parents=True, exist_ok=True)
@@ -79,19 +82,24 @@ def _download_packages(missing: tuple[RuntimePackage, ...], root: Path, staging:
         download_verified(package.url, archive, size=package.size, sha256=package.sha256,
                           channel=channel, progress_callback=progress)
         extracted = extract_update_archive(archive, staging.parent / f"package-{package.identity}")
-        verified = verify_payload(extracted)
+        _, manifest, files = _plan_payload(extracted)
         expected = {item.path: item.sha256 for item in package.files}
-        actual = {item.relative_path.as_posix(): item.sha256 for item in verified.files}
-        if expected != actual or verified.manifest.get("schema_version") != 1:
+        actual = {item.relative_path.as_posix(): item.sha256 for item in files}
+        if expected != actual or manifest.get("schema_version") != 1:
             raise UpdateError("运行环境包文件与签名清单不一致。")
         if package.uncompressed_size and sum(p.stat().st_size for p in extracted.rglob("*") if p.is_file()) != package.uncompressed_size:
             raise UpdateError("运行环境包展开体积不一致。")
         for item in package.files:
-            source = _checked_target(extracted, Path(item.path))
+            relative = Path(item.path)
+            source = _checked_target(extracted, relative)
             if source.stat().st_size != item.size:
                 raise UpdateError("运行环境文件大小不一致。")
-            _copy(source, staging / item.path)
+            target = staging / relative
+            if _copy_and_hash(source, target) != item.sha256:
+                raise UpdateError(f"运行环境包文件与签名清单不一致：{item.path}")
+            staged_files.append(VerifiedPayloadFile(relative, target, item.sha256))
         completed += package.size
+    return staged_files
 
 
 def _removals(root: Path, targets: set[str], *, kind: str) -> list[dict]:
@@ -112,7 +120,8 @@ def _removals(root: Path, targets: set[str], *, kind: str) -> list[dict]:
 
 
 def prepare_deployment(payload_root: Path | None, root: Path, working: Path,
-                       channel: UpdateChannel, *, progress_callback=None) -> Path:
+                       channel: UpdateChannel, *, progress_callback=None,
+                       verified_payload: VerifiedPayload | None = None) -> Path:
     """Stage only changed environment packages; final inventory also removes obsolete files."""
     if (root / ENVIRONMENT_JOURNAL).exists():
         raise UpdateError("上次环境安装未完成，请先在运行中心重试安装。")
@@ -120,57 +129,84 @@ def prepare_deployment(payload_root: Path | None, root: Path, working: Path,
     if environment is None:
         raise UpdateError("应用缺少签名运行环境清单。")
     missing = missing_packages(environment, root, progress_callback)
-    verified = verify_payload(payload_root) if payload_root is not None else None
+    verified = verified_payload
+    if verified is not None:
+        if payload_root is None:
+            raise PayloadError("已校验载荷与当前安装来源不匹配。")
+        _reuse_verified_payload_plan(payload_root, verified)
+    elif payload_root is not None:
+        verified = verify_payload(payload_root)
     application_bytes = sum(item.source_path.stat().st_size for item in verified.files) if verified else 0
     required_space = (sum(package.size + 3 * sum(item.size for item in package.files) for package in missing)
                       + application_bytes + 64 * 1024**2)
     if shutil.disk_usage(root).free < required_space:
         raise UpdateError("运行环境安装所需磁盘空间不足。")
-    staging = extended_windows_path(working / f"deployment-{uuid.uuid4().hex}")
+    staging = extended_windows_path(working / f"deployment-{uuid.uuid4().hex}").resolve()
     staging.mkdir(parents=True, exist_ok=False)
     manifest = {"schema_version": 3, "update_kind": "environment", "files": []}
     app_paths = set()
+    staged_files = []
     if verified is not None:
         if verified.manifest.get("application_package") != 1:
             raise UpdateError("载荷不是完整应用包。")
-        for item in verified.files:
+        total = len(verified.files)
+        if progress_callback:
+            progress_callback("prepare", 0, total)
+        for index, item in enumerate(verified.files, 1):
             if item.relative_path.parts[0].casefold() == "runtime":
                 raise UpdateError("应用包不能内嵌运行环境。")
             validate_deployment_path(item.relative_path, kind="application")
-            _copy(item.source_path, staging / item.relative_path)
+            target = staging / item.relative_path
+            if _copy_and_hash(item.source_path, target) != item.sha256:
+                raise PayloadError(f"应用文件在准备期间已改变：{item.relative_path.as_posix()}")
+            staged_files.append(VerifiedPayloadFile(item.relative_path, target, item.sha256))
             app_paths.add(item.relative_path.as_posix().casefold())
+            if progress_callback:
+                progress_callback("prepare", index, total)
         manifest.update(update_kind="application", release_version=verified.manifest["release_version"])
         if "release_build" in verified.manifest:
             manifest["release_build"] = verified.manifest["release_build"]
-    _download_packages(missing, root, staging, channel, progress_callback)
-    write_json_atomic(staging / ENVIRONMENT_RECEIPT, {"schema_version": 1, "id": environment.identity})
+    staged_files.extend(_download_packages(missing, root, staging, channel, progress_callback))
+    receipt = staging / ENVIRONMENT_RECEIPT
+    write_json_atomic(receipt, {"schema_version": 1, "id": environment.identity})
+    staged_files.append(VerifiedPayloadFile(ENVIRONMENT_RECEIPT, receipt, sha256_file(receipt)))
     targets = app_paths | {item.path.casefold() for item in environment.files} | {ENVIRONMENT_RECEIPT.as_posix()}
     manifest["remove"] = _removals(root, targets, kind=manifest["update_kind"])
-    manifest["files"] = [{"path": path.relative_to(staging).as_posix(), "sha256": sha256_file(path)}
-                         for path in sorted(staging.rglob("*")) if path.is_file()]
+    staged_files.sort(key=lambda item: item.relative_path)
+    manifest["files"] = [{"path": item.relative_path.as_posix(), "sha256": item.sha256} for item in staged_files]
     staged_paths = {item["path"].casefold() for item in manifest["files"]}
     manifest["reuse"] = [{"path": item.path, "sha256": item.sha256}
                          for item in environment.files if item.path.casefold() not in staged_paths]
+    _manifest_specs(manifest)
     write_json_atomic(staging / PAYLOAD_MANIFEST, manifest)
-    verify_deployment_environment(staging, root, channel)
+    verify_deployment_environment(staging, root, channel,
+                                  verified_payload=VerifiedPayload(staging, manifest, tuple(staged_files)),
+                                  check_installed=False)
     return staging
 
 
-def verify_deployment_environment(staging: Path, root: Path, channel: UpdateChannel) -> None:
-    """Recheck reused bytes after process handoff, before any installed file changes."""
+def verify_deployment_environment(staging: Path, root: Path, channel: UpdateChannel, *,
+                                  verified_payload: VerifiedPayload | None = None,
+                                  check_installed: bool = True) -> None:
+    """Bind the staged and reused inventories to the signed environment."""
     environment = load_environment(staging if (staging / ENVIRONMENT_MANIFEST).exists() else root, channel)
     if environment is None:
         raise UpdateError("安装事务缺少签名环境清单。")
+    verified = verified_payload or verify_payload(staging)
+    if verified.root != staging.resolve():
+        raise PayloadError("已校验载荷与当前安装来源不匹配。")
+    staged_files = {item.relative_path.as_posix().casefold(): item for item in verified.files}
     for item in environment.files:
-        source = _checked_target(staging, Path(item.path))
-        if not source.is_file():
+        staged = staged_files.get(item.path.casefold())
+        if staged is not None:
+            if staged.sha256 != item.sha256 or staged.source_path.stat().st_size != item.size:
+                raise UpdateError(f"运行环境文件在准备后改变：{item.path}")
+        elif check_installed:
             source = _checked_target(root, Path(item.path))
-        if not source.is_file() or source.stat().st_size != item.size or sha256_file(source) != item.sha256:
-            raise UpdateError(f"运行环境文件在准备后改变：{item.path}")
+            if not source.is_file() or source.stat().st_size != item.size or sha256_file(source) != item.sha256:
+                raise UpdateError(f"运行环境文件在准备后改变：{item.path}")
     expected = {item.path.casefold() for item in environment.files}
-    verified = verify_payload(staging)
-    staged_paths = {item.relative_path.as_posix().casefold() for item in verified.files}
-    expected_reuse = {item.path.casefold(): item.sha256 for item in environment.files if item.path.casefold() not in staged_paths}
+    expected_reuse = {item.path.casefold(): item.sha256 for item in environment.files if item.path.casefold() not in staged_files}
     actual_reuse = {item["path"].casefold(): item["sha256"] for item in verified.manifest.get("reuse", [])}
     if actual_reuse != expected_reuse:
         raise UpdateError("复用文件清单与目标环境不一致。")
@@ -182,7 +218,8 @@ def verify_deployment_environment(staging: Path, root: Path, channel: UpdateChan
     if removals & expected:
         raise UpdateError("安装事务不能删除目标环境需要的文件。")
 
-    for entry in verified.manifest.get("remove", []):
-        path = _checked_target(root, Path(entry["path"]))
-        if path.exists() and (not path.is_file() or sha256_file(path) != entry["sha256"]):
-            raise UpdateError(f"待清理的旧文件在准备后改变：{entry['path']}")
+    if check_installed:
+        for entry in verified.manifest.get("remove", []):
+            path = _checked_target(root, Path(entry["path"]))
+            if path.exists() and (not path.is_file() or sha256_file(path) != entry["sha256"]):
+                raise UpdateError(f"待清理的旧文件在准备后改变：{entry['path']}")

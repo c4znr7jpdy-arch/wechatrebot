@@ -138,16 +138,50 @@ def test_skip_versions_removes_only_owned_old_files_and_keeps_user_data(environm
     assert json.loads((root / "config/installed-payload.json").read_text())["release_version"] == "1.4.0"
 
 
-def test_reused_file_changed_after_preparation_blocks_install(environment_factory, tmp_path):
+def test_reused_file_changed_after_preparation_blocks_install(environment_factory, tmp_path, monkeypatch):
     env, _, source = environment_factory()
     root = tmp_path / "install"
     shutil.copytree(source, root / "runtime")
     staging = runtime_deployment.prepare_deployment(_application(tmp_path / "app", env), root,
                                                    root / "updates", environment_factory.channel)
+    verified = payload.verify_payload(staging)
     (root / "runtime/python/python.exe").write_bytes(b"changed")
     with pytest.raises(UpdateError, match="准备后改变"):
         runtime_deployment.verify_deployment_environment(staging, root, environment_factory.channel)
+
+    def unexpected_hash(_path):
+        pytest.fail("deployment metadata check reread file content")
+
+    with monkeypatch.context() as checks:
+        checks.setattr(payload, "sha256_file", unexpected_hash)
+        checks.setattr(runtime_deployment, "sha256_file", unexpected_hash)
+        runtime_deployment.verify_deployment_environment(
+            staging, root, environment_factory.channel, verified_payload=verified, check_installed=False,
+        )
+    with pytest.raises(payload.PayloadError, match="复用的运行环境文件已改变"):
+        payload.install_payload(staging, root, verified_payload=verified)
     assert not (root / "manager/WeChatReBot.exe").exists()
+
+
+def test_staged_runtime_file_must_match_signed_environment(environment_factory, tmp_path):
+    env, _, _ = environment_factory()
+    root = tmp_path / "install"
+    root.mkdir()
+    staging = runtime_deployment.prepare_deployment(_application(tmp_path / "app", env), root,
+                                                   root / "updates", environment_factory.channel)
+    relative = "runtime/python/python.exe"
+    (staging / relative).write_bytes(b"forged")
+    manifest_path = staging / payload.PAYLOAD_MANIFEST
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["files"] if item["path"] == relative)
+    entry["sha256"] = payload.sha256_file(staging / relative)
+    write_json_atomic(manifest_path, manifest)
+    verified = payload.verify_payload(staging)
+
+    with pytest.raises(UpdateError, match="准备后改变"):
+        runtime_deployment.verify_deployment_environment(
+            staging, root, environment_factory.channel, verified_payload=verified, check_installed=False,
+        )
 
 
 def test_install_failure_restores_environment_and_allows_cached_retry(environment_factory, tmp_path, monkeypatch):
