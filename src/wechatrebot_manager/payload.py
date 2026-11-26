@@ -630,12 +630,14 @@ def install_payload(
     before_replace receives the target and incoming file (None for removal)
     immediately before each mutation. When supplied, its
     caller owns rollback and cleanup, including exceptions from this function.
+    An unchanged_files inventory from that caller covers all identical targets.
     """
     payload_root_path, manifest, planned = (
         _reuse_verified_payload_plan(payload_root, verified_payload)
         if verified_payload is not None else _plan_payload(payload_root)
     )
     unchanged = dict(unchanged_files or {})
+    has_target_snapshot = before_replace is not None and unchanged_files is not None
     expected_files = {item.relative_path: item.sha256 for item in planned}
     if any(
         not isinstance(relative, Path) or not _valid_digest(digest)
@@ -732,12 +734,18 @@ def install_payload(
             for index, item in enumerate(planned, start=1):
                 staged = _transaction_file(stage_root, index)
                 target = targets[item.relative_path]
-                existing_digest = sha256_file(target) if target.is_file() else None
+                preserve_target = preserve_existing_user_config and _is_user_config(item.relative_path)
+                # The rollback snapshot already compared existing bytes. Changed
+                # targets are checked again by the rollback owner at replacement.
+                if has_target_snapshot and not preserve_target:
+                    existing_digest = unchanged.get(item.relative_path)
+                else:
+                    existing_digest = sha256_file(target) if target.is_file() else None
                 if item.relative_path in unchanged and existing_digest != unchanged[item.relative_path]:
                     raise PayloadError(f"未变更文件在更新准备期间已改变：{item.relative_path.as_posix()}")
                 if existing_digest is not None and (
                     existing_digest == item.sha256
-                    or preserve_existing_user_config and _is_user_config(item.relative_path)
+                    or preserve_target
                 ):
                     unstaged[item.relative_path] = existing_digest
                     staged = None
@@ -763,10 +771,14 @@ def install_payload(
         # Preparation can take time: recheck the base and every target before the
         # first installed file changes, including callback/concurrent edits.
         reused = _manifest_reused_specs(manifest)
-        for relative, digest in reused:
+        if reused and progress_callback is not None:
+            progress_callback("runtime_check", 0, len(reused))
+        for index, (relative, digest) in enumerate(reused, start=1):
             target = _checked_target(root, relative)
             if not target.is_file() or sha256_file(target) != digest:
                 raise PayloadError(f"复用的运行环境文件已改变：{relative.as_posix()}")
+            if progress_callback is not None:
+                progress_callback("runtime_check", index, len(reused))
         if incremental:
             previous_manifest = _read_installed_manifest_for_merge(root)
             _validate_incremental_base(manifest, root, previous_manifest)
@@ -782,7 +794,8 @@ def install_payload(
         installed_files: list[VerifiedPayloadFile] = []
         for index, item in enumerate(verified_files, start=1):
             target = _checked_target(root, item.relative_path)
-            existing_digest = sha256_file(target) if target.is_file() else None
+            compare_target = not has_target_snapshot or item.relative_path in unstaged
+            existing_digest = sha256_file(target) if compare_target and target.is_file() else None
             if item.relative_path in unchanged and (
                 existing_digest != unchanged[item.relative_path]
             ):

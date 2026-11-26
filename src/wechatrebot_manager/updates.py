@@ -32,6 +32,8 @@ from .payload import (
     COPY_BACKUP_PATHS,
     PayloadError,
     _checked_target,
+    _manifest_specs,
+    _read_directory_manifest,
     _read_installed_manifest_for_merge,
     _replace_file,
     _valid_digest,
@@ -625,7 +627,8 @@ def prepare_update(
         if verified.manifest.get("application_package") == 1:
             from .runtime_deployment import prepare_deployment
             payload_root = prepare_deployment(payload_root, root, working, channel,
-                                              progress_callback=progress_callback)
+                                              progress_callback=progress_callback,
+                                              verified_payload=verified)
         return PreparedUpdate(release, working, payload_root, final_archive)
     except Exception as exc:
         if isinstance(exc, UpdateFailure):
@@ -684,11 +687,17 @@ def create_update_plan(
         raise UpdateError("更新计划引用了暂存目录之外的文件。") from exc
     if not _path_within(prepared.payload_root, working):
         raise UpdateError("更新计划引用了暂存目录之外的文件。")
-    verified = verify_payload(prepared.payload_root)
     if (prepared.payload_root.parent / "payload-consumed.json").exists():
         raise UpdateError("上次安装已使用暂存文件，请重新准备更新；已下载的包会保留。")
-    _validate_selected_package(prepared.release, verified.manifest)
-    _validate_update_baseline(prepared.payload_root, root)
+    if automatic_install and prepared.payload_root.is_dir():
+        # The automatic helper is copied from the running manager. It checks
+        # the staged file bytes after handoff, before installing them.
+        manifest = _read_directory_manifest(prepared.payload_root)
+        _manifest_specs(manifest)
+    else:
+        manifest = verify_payload(prepared.payload_root).manifest
+        _validate_update_baseline(prepared.payload_root, root)
+    _validate_selected_package(prepared.release, manifest)
     source_executable = Path(executable or sys.executable).expanduser().resolve()
     if not source_executable.is_file() or source_executable.suffix.casefold() != ".exe":
         raise UpdateError("无法创建独立更新程序。")
@@ -700,7 +709,7 @@ def create_update_plan(
         # its detached helper, never assume an arbitrary incoming EXE does.
         helper_source = source_executable
     if not helper_source.is_file():
-        if verified.manifest.get("schema_version") != 2:
+        if manifest.get("schema_version") != 2:
             raise UpdateError("更新包缺少可运行的独立更新程序。")
         helper_source = source_executable
     shutil.copy2(helper_source, helper)
@@ -719,7 +728,7 @@ def create_update_plan(
             # the installed recovery capability from its own version.
             "rollback_journal_schema": 2,
             "automatic_install": 1 if automatic_install else 0,
-            "consume_prepared_payload": automatic_install and verified.manifest.get("schema_version") in {1, 3},
+            "consume_prepared_payload": automatic_install and manifest.get("schema_version") in {1, 3},
             "install_root": str(root),
             "payload_root": str(prepared.payload_root.resolve()),
             "target_executable": str(root / "manager" / "WeChatReBot.exe"),
@@ -1149,31 +1158,39 @@ def apply_update_plan(
             except HandoffCancelled:
                 return 0
         parents_exited = True
+        if progress_callback:
+            progress_callback("verify", 0, 0)
         verified = verify_payload(payload_root, progress_callback=progress_callback)
         if verified.manifest.get("application_package") == 1:
             # A legacy manager can hand the small application to its new helper.
             # Prepare its environment before changing any installed application bytes.
             from .runtime_deployment import prepare_deployment
+            if progress_callback:
+                progress_callback("checking_processes", 0, 0)
             assert_update_runtime_stopped(payload_root, root)
             payload_root = prepare_deployment(payload_root, root, Path(plan_path).parent,
-                                              load_update_channel(root), progress_callback=progress_callback)
+                                              load_update_channel(root), progress_callback=progress_callback,
+                                              verified_payload=verified)
             plan["payload_root"] = str(payload_root)
             write_json_atomic(Path(plan_path), plan)
-            verified = verify_payload(payload_root)
+            if progress_callback:
+                progress_callback("verify", 0, 0)
+            verified = verify_payload(payload_root, progress_callback=progress_callback)
+        if progress_callback:
+            progress_callback("checking_processes", 0, 0)
+        assert_update_runtime_stopped(payload_root, root)
         if verified.manifest.get("schema_version") == 3:
             from .runtime_deployment import verify_deployment_environment
             from .runtime_install import recover_environment
-            assert_update_runtime_stopped(payload_root, root)
             recover_environment(root)
-            verify_deployment_environment(payload_root, root, load_update_channel(root))
+            verify_deployment_environment(payload_root, root, load_update_channel(root),
+                                          verified_payload=verified, check_installed=False)
         manager_changed = Path("manager/WeChatReBot.exe") in {item.relative_path for item in verified.files}
         consume_prepared = (
             plan.get("consume_prepared_payload") is True
             and plan.get("automatic_install") == 1
             and verified.manifest.get("schema_version") in {1, 3}
         )
-        _validate_update_baseline(payload_root, root)
-        assert_update_runtime_stopped(payload_root, root)
         _assert_manager_executable_available(payload_root, root)
         move_existing = (
             type(plan.get("rollback_journal_schema")) is int
