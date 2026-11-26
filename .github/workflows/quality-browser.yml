@@ -1,0 +1,58 @@
+name: Quality browser tests
+
+on:
+  workflow_call:
+    inputs:
+      group:
+        required: true
+        type: string
+      artifact:
+        required: true
+        type: string
+      timeout:
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: ${{ inputs.timeout }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/playwright-browsers
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml') }}
+      - name: Install test browser
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: python -m playwright install chromium
+      - name: Run browser tests
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+          QUALITY_GROUP: ${{ inputs.group }}
+        run: python scripts/quality_ci.py run "$env:QUALITY_GROUP" -q -ra --basetemp "${{ runner.temp }}/browser-tests" --junitxml "${{ runner.temp }}/browser-results.xml"
+      - name: Upload browser test results and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: |
+            ${{ runner.temp }}/browser-results.xml
+            ${{ runner.temp }}/browser-tests/**/browser-failure/**
+            ${{ runner.temp }}/browser-tests/**/*.png
+          if-no-files-found: ignore
