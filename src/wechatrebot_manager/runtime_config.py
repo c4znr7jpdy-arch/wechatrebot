@@ -15,7 +15,9 @@ from .port_config import RuntimePorts, _load_object, load_runtime_ports
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
+    PROVIDER_INHERITED_FIELDS,
     normalize_service_kind,
+    prepare_provider_save,
     with_thinking_mode,
 )
 from .retired_plugins import purge_retired_plugins
@@ -275,14 +277,14 @@ def _apply_provider_to_astrbot(
     profile: OpenAIProviderProfile,
     *,
     make_default: bool = True,
-) -> None:
-    normalized = profile.normalized()
-    errors = normalized.validate()
-    if errors:
-        raise ValueError("；".join(errors))
+    create_new: bool = False,
+) -> OpenAIProviderProfile:
+    normalized, source_payload = prepare_provider_save(
+        profile, payload.get("provider_sources"), payload.get("provider"), create_new=create_new,
+    )
     payload["provider_sources"] = _upsert_by_id(
         payload.get("provider_sources"),
-        normalized.astrbot_source(),
+        source_payload,
         # Keep vendor-specific extras, but never inherit an old unbounded/very
         # long request timeout: it can make a simple @ reply appear frozen for
         # minutes. The product timeout is part of the unified provider policy.
@@ -317,8 +319,16 @@ def _apply_provider_to_astrbot(
             model=normalized.model,
         )
         updated_model_fields += ("custom_extra_body",)
+    # Source credentials and transport options must come from the new binding,
+    # even for legacy records that stored inherited fields on the model itself.
+    provider_items = payload.get("provider")
+    cleaned_models = [
+        {key: value for key, value in item.items() if key not in PROVIDER_INHERITED_FIELDS}
+        if isinstance(item, dict) and item.get("id") == normalized.model_id else item
+        for item in (provider_items if isinstance(provider_items, list) else [])
+    ]
     payload["provider"] = _upsert_by_id(
-        payload.get("provider"),
+        cleaned_models,
         model_payload,
         updated_fields=updated_model_fields,
     )
@@ -335,6 +345,7 @@ def _apply_provider_to_astrbot(
         provider_settings["default_provider_id"] = normalized.model_id
         provider_settings["context_limit_reached_strategy"] = "llm_compress"
         provider_settings["llm_compress_provider_id"] = normalized.model_id
+    return normalized
 
 
 def _sync_delivery_plugins(
@@ -565,11 +576,12 @@ def write_runtime_configs(
     apply_brand_persona: bool = True,
     provider_profile: OpenAIProviderProfile | None = None,
     provider_make_default: bool = True,
+    provider_create_new: bool = False,
     admin_id: str | None = None,
     admin_ids: list[str] | tuple[str, ...] | None = None,
-) -> None:
+) -> OpenAIProviderProfile | None:
     with CONFIG_FILE_LOCK:
-        _write_runtime_configs_locked(
+        return _write_runtime_configs_locked(
             install_root,
             wechat_exe_path,
             wechat_version=wechat_version,
@@ -578,6 +590,7 @@ def write_runtime_configs(
             apply_brand_persona=apply_brand_persona,
             provider_profile=provider_profile,
             provider_make_default=provider_make_default,
+            provider_create_new=provider_create_new,
             admin_id=admin_id,
             admin_ids=admin_ids,
         )
@@ -593,9 +606,10 @@ def _write_runtime_configs_locked(
     apply_brand_persona: bool = True,
     provider_profile: OpenAIProviderProfile | None = None,
     provider_make_default: bool = True,
+    provider_create_new: bool = False,
     admin_id: str | None = None,
     admin_ids: list[str] | tuple[str, ...] | None = None,
-) -> None:
+) -> OpenAIProviderProfile | None:
     normalized_admins = normalize_admin_ids(admin_ids)
     if normalized_admins is None and admin_id is not None:
         normalized_admin = normalize_admin_id(admin_id)
@@ -665,10 +679,11 @@ def _write_runtime_configs_locked(
         if brand_profile is not None and apply_brand_persona:
             _apply_brand_to_astrbot(astrbot_payload, brand_profile)
         if provider_profile is not None:
-            _apply_provider_to_astrbot(
+            provider_profile = _apply_provider_to_astrbot(
                 astrbot_payload,
                 provider_profile,
                 make_default=provider_make_default,
+                create_new=provider_create_new,
             )
         if normalized_admins is not None:
             astrbot_payload["admins_id"] = list(normalized_admins)
@@ -724,3 +739,4 @@ def _write_runtime_configs_locked(
         manager_path,
         manager_payload,
     )
+    return provider_profile.normalized() if provider_profile is not None else None

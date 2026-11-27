@@ -608,6 +608,7 @@ def load_provider_profile(
         api_base=service.api_base,
         model=service.model,
         source_id=service.source_id,
+        provider_id=service.provider_id,
         thinking_enabled=service.thinking_enabled,
     ).normalized()
 
@@ -617,6 +618,7 @@ def save_provider_profile(
     profile: OpenAIProviderProfile,
     *,
     make_default: bool = True,
+    create_new: bool = False,
 ) -> OpenAIProviderProfile:
     normalized = profile.normalized()
     errors = normalized.validate()
@@ -626,18 +628,21 @@ def save_provider_profile(
         install, manager_path, _ = _paths(root)
         manager = _object(manager_path)
         wechat_path = str(manager.get("wechat_exe_path", ""))
-        write_runtime_configs(
+        saved = write_runtime_configs(
             install,
             wechat_path or None,
             wechat_version=str(manager.get("wechat_version") or "") or None,
             provider_profile=normalized,
             provider_make_default=make_default,
+            provider_create_new=create_new,
         )
-        if normalized.thinking_enabled is not None:
+        if saved is None:
+            raise ValueError("模型服务保存结果无效，请刷新后重试。")
+        if saved.thinking_enabled is not None:
             save_provider_thinking_preference(
-                install, normalized.model_id, normalized.thinking_enabled
+                install, saved.model_id, saved.thinking_enabled
             )
-        return normalized
+        return saved
 
 
 def set_default_provider(root: str | Path, provider_id: str) -> None:

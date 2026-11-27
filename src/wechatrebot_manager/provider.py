@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import copy
 import hashlib
 import json
 import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlsplit
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from .error_catalog import provider_error_code
 from .plugin_errors import ProviderTestError
@@ -29,6 +31,11 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = 35
 # Keep one product-level attempt so a failed endpoint cannot hold a group reply
 # for several minutes. The SDK retry is disabled by the bundled runtime patch.
 PROVIDER_REQUEST_MAX_ATTEMPTS = 1
+PROVIDER_INHERITED_FIELDS = (
+    "key", "api_base", "timeout", "proxy", "custom_headers", "provider",
+    "type", "provider_type", "service_kind", "embedding_model",
+    "embedding_api_base", "embedding_api_key",
+)
 
 # OpenAI-compatible entry points that are useful when adding a service from
 # the manager. Values are intentionally editable and are only starting points;
@@ -614,6 +621,7 @@ class OpenAIProviderProfile:
     thinking_enabled: bool | None = None
     service_kind: str = "chat"
     modalities: tuple[str, ...] = ()
+    provider_id: str = ""
 
     def normalized(self) -> "OpenAIProviderProfile":
         return OpenAIProviderProfile(
@@ -626,6 +634,7 @@ class OpenAIProviderProfile:
             modalities=infer_provider_modalities(
                 self.service_kind, self.model, self.modalities
             ),
+            provider_id=self.provider_id.strip(),
         )
 
     def validate(self) -> tuple[str, ...]:
@@ -642,6 +651,7 @@ class OpenAIProviderProfile:
                 thinking_enabled=self.thinking_enabled,
                 service_kind="chat",
                 modalities=self.modalities,
+                provider_id=self.provider_id,
             ).normalized()
         if not profile.api_key:
             errors.append("模型 API Key / Token Plan 不能为空。")
@@ -653,6 +663,11 @@ class OpenAIProviderProfile:
             errors.append("模型名称不能为空且不能超过 128 个字符。")
         if not _SAFE_ID.fullmatch(profile.source_id):
             errors.append("模型来源 ID 格式无效。")
+        if len(profile.provider_id) > 256 or any(
+            ord(character) < 32 or 127 <= ord(character) < 160
+            for character in self.provider_id
+        ):
+            errors.append("模型服务 ID 格式无效。")
         if profile.thinking_enabled is not None:
             if not isinstance(profile.thinking_enabled, bool):
                 errors.append("思考模式只能选择开启或关闭。")
@@ -673,7 +688,7 @@ class OpenAIProviderProfile:
     @property
     def model_id(self) -> str:
         profile = self.normalized()
-        return f"{profile.source_id}/{profile.model}"
+        return profile.provider_id or f"{profile.source_id}/{profile.model}"
 
     def astrbot_source(self) -> dict[str, object]:
         profile = self.normalized()
@@ -725,6 +740,87 @@ class OpenAIProviderProfile:
             ),
             "max_context_tokens": 131072,
         }
+
+
+def _provider_source_matches(
+    source: dict[str, object] | None, profile: OpenAIProviderProfile,
+) -> bool:
+    if source is None:
+        return False
+    keys = source.get("key")
+    if isinstance(keys, str):
+        keys = [keys]
+    return (
+        normalize_api_base(str(source.get("api_base") or "")) == profile.api_base
+        and keys == [profile.api_key]
+    )
+
+
+def prepare_provider_save(
+    profile: OpenAIProviderProfile,
+    sources: object,
+    providers: object,
+    *,
+    create_new: bool = False,
+) -> tuple[OpenAIProviderProfile, dict[str, object]]:
+    """Isolate changed credentials while retaining an edited model's public ID."""
+    errors = profile.validate()
+    if errors:
+        raise ValueError("；".join(errors))
+    normalized = profile.normalized()
+    sources = sources if isinstance(sources, list) else []
+    providers = providers if isinstance(providers, list) else []
+    source_records = {
+        item.get("id"): item for item in sources if isinstance(item, dict)
+    }
+    existing_model = next(
+        (item for item in providers
+         if isinstance(item, dict) and item.get("id") == normalized.model_id),
+        None,
+    )
+    source = source_records.get(normalized.source_id)
+    previous_source = (
+        source_records.get(existing_model.get("provider_source_id"))
+        if existing_model is not None else None
+    )
+    if create_new and existing_model is not None and _provider_source_matches(previous_source, normalized):
+        normalized = replace(
+            normalized, source_id=str(previous_source["id"]),
+            provider_id=str(existing_model["id"]),
+        )
+        source = previous_source
+    template = source if source is not None else previous_source
+    new_identity = (
+        create_new and existing_model is not None
+        and not _provider_source_matches(previous_source, normalized)
+    )
+    edited_id = existing_model.get("id") if existing_model is not None and not new_identity else None
+    shared = any(
+        isinstance(item, dict)
+        and item.get("provider_source_id") == normalized.source_id
+        and item.get("id") != edited_id
+        for item in providers
+    )
+    if new_identity or (source is not None and shared and not _provider_source_matches(source, normalized)):
+        source_id = f"custom_{uuid4().hex[:24]}"
+        while source_id in source_records:
+            source_id = f"custom_{uuid4().hex[:24]}"
+        normalized = replace(
+            normalized,
+            source_id=source_id,
+            provider_id=(
+                str(edited_id) if edited_id is not None
+                else "" if new_identity else normalized.provider_id
+            ),
+        )
+    managed = normalized.astrbot_source()
+    source_payload = {**managed, **copy.deepcopy(template or {})}
+    for name in (
+        "id", "key", "api_base", "embedding_api_base", "embedding_api_key",
+        "enable", "timeout",
+    ):
+        source_payload[name] = managed[name]
+    return normalized, source_payload
 
 
 def discover_openai_models(
@@ -812,6 +908,7 @@ __all__ = [
     "DEFAULT_PROVIDER_MODEL_ID",
     "DEFAULT_PROVIDER_SOURCE_ID",
     "OpenAIProviderProfile",
+    "PROVIDER_INHERITED_FIELDS",
     "PROVIDER_REQUEST_TIMEOUT_SECONDS",
     "discover_openai_models",
     "provider_display_name",
@@ -820,6 +917,7 @@ __all__ = [
     "normalize_service_kind",
     "infer_provider_modalities",
     "provider_source_id",
+    "prepare_provider_save",
     "infer_thinking_mode",
     "supports_thinking_toggle",
     "thinking_mode_adapter",

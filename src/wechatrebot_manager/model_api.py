@@ -75,6 +75,10 @@ def _provider_api_key(values: dict[str, Any], selected: ProviderService | None) 
 
 class ModelApiMixin:
     def save_provider(self, values: dict[str, Any]) -> dict[str, object]:
+        with CONFIG_FILE_LOCK:
+            return self._save_provider(values)
+
+    def _save_provider(self, values: dict[str, Any]) -> dict[str, object]:
         try:
             services = load_provider_services(self._install_root)
             original_id = str(values.get("provider_id") or "").strip()
@@ -82,6 +86,8 @@ class ModelApiMixin:
                 (item for item in services if item.provider_id == original_id),
                 None,
             )
+            if original_id and selected is None:
+                raise ValueError("所选模型服务不存在，请刷新后重试。")
             service_kind = str(
                 values.get("service_kind")
                 or (getattr(selected, "service_kind", "chat") if selected is not None else "chat")
@@ -110,6 +116,7 @@ class ModelApiMixin:
                 api_key=api_key,
                 api_base=api_base,
                 model=model,
+                provider_id=(original_id if selected is not None and selected.model == model else ""),
                 source_id=(
                     selected.source_id
                     if (
@@ -135,7 +142,7 @@ class ModelApiMixin:
             client = EngineApiClient(self._install_root)
             hot_applied = client.is_available()
             if hot_applied:
-                client.save_provider(
+                saved = client.save_provider(
                     profile,
                     original_provider_id=(
                         original_id
@@ -144,8 +151,8 @@ class ModelApiMixin:
                         else None
                     ),
                     make_default=make_default,
+                    create_new=selected is None or selected.model != model,
                 )
-                saved = profile.normalized()
                 if saved.thinking_enabled is not None:
                     save_provider_thinking_preference(
                         self._install_root, saved.model_id, saved.thinking_enabled
@@ -155,6 +162,7 @@ class ModelApiMixin:
                     self._install_root,
                     profile,
                     make_default=make_default,
+                    create_new=selected is None or selected.model != model,
                 )
             if editing_embedding and service_kind == "embedding" and original_id != saved.model_id:
                 migrated = self.delete_provider(original_id, saved.model_id)
@@ -353,6 +361,7 @@ class ModelApiMixin:
                 api_base=selected.api_base,
                 model=selected.model,
                 source_id=selected.source_id,
+                provider_id=selected.provider_id,
                 thinking_enabled=selected.thinking_enabled,
                 service_kind=selected.service_kind,
                 modalities=selected.modalities,

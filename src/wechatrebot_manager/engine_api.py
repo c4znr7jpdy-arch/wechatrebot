@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import hashlib
 import hmac
 import json
@@ -22,6 +23,8 @@ from .port_config import load_runtime_ports
 from .provider import (
     OpenAIProviderProfile,
     PROVIDER_REQUEST_MAX_ATTEMPTS,
+    PROVIDER_INHERITED_FIELDS,
+    prepare_provider_save,
     supports_thinking_toggle,
     thinking_mode_matches,
     without_thinking_mode,
@@ -267,30 +270,26 @@ class EngineApiClient:
         *,
         original_provider_id: str | None = None,
         make_default: bool = True,
-    ) -> None:
+        create_new: bool = False,
+    ) -> OpenAIProviderProfile:
         normalized = profile.normalized()
         errors = normalized.validate()
         if errors:
             raise ValueError("；".join(errors))
         sources, providers = self._provider_records()
+        original = next(
+            (item for item in providers if item.get("id") == original_provider_id), None,
+        )
+        if original is not None and original.get("model") == normalized.model:
+            normalized = replace(normalized, provider_id=original_provider_id)
+        normalized, source_payload = prepare_provider_save(
+            normalized, sources, providers, create_new=create_new,
+        )
         source_existing = next(
             (item for item in sources if item.get("id") == normalized.source_id),
             None,
         )
-        source_payload = normalized.astrbot_source()
         if source_existing is not None:
-            source_payload = {**source_payload, **source_existing}
-            source_payload.update(
-                {
-                    "id": normalized.source_id,
-                    "key": [normalized.api_key],
-                    "api_base": normalized.api_base,
-                    "embedding_api_base": normalized.api_base,
-                    "embedding_api_key": normalized.api_key,
-                    "timeout": normalized.astrbot_source()["timeout"],
-                    "enable": True,
-                }
-            )
             self.request(
                 "PUT",
                 "/api/v1/provider-sources/by-id",
@@ -316,20 +315,7 @@ class EngineApiClient:
                 ),
                 None,
             )
-            for inherited_field in (
-                "key",
-                "api_base",
-                "timeout",
-                "proxy",
-                "custom_headers",
-                "provider",
-                "type",
-                "provider_type",
-                "service_kind",
-                "embedding_model",
-                "embedding_api_base",
-                "embedding_api_key",
-            ):
+            for inherited_field in PROVIDER_INHERITED_FIELDS:
                 current_model.pop(inherited_field, None)
             model_payload = {**model_payload, **current_model}
             model_payload.update(
@@ -386,7 +372,10 @@ class EngineApiClient:
         if (
             not isinstance(source, dict)
             or str(source.get("api_base") or "").rstrip("/") != normalized.api_base
+            or source.get("key") != [normalized.api_key]
+            or source.get("embedding_api_key") != normalized.api_key
             or not isinstance(provider, dict)
+            or provider.get("provider_source_id") != normalized.source_id
             or str(provider.get("model") or "") != normalized.model
             or str(provider.get("service_kind") or "chat") != normalized.service_kind
             or verified_modalities != set(expected_modalities)
@@ -399,6 +388,7 @@ class EngineApiClient:
             )
         ):
             raise PluginCenterError("模型服务已提交，但没有收到生效确认，请刷新后重试。")
+        return normalized
 
     def set_provider_thinking(self, provider_id: str, enabled: bool) -> bool:
         if not isinstance(enabled, bool):
