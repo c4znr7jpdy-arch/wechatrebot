@@ -85,9 +85,11 @@ def test_hourly_selection_handles_exact_hours_and_midnight(weather, at, expected
 
 @pytest.mark.parametrize("provider", ["open_meteo", "alapi"])
 @pytest.mark.parametrize("failure, attempts, reason", [
-    ("timeout", {"open_meteo": 2, "alapi": 1}, "ReadTimeout"),
-    (503, {"open_meteo": 2, "alapi": 1}, "HTTP 503"),
-    (401, {"open_meteo": 1, "alapi": 1}, "HTTP 401"),
+    (httpx.ConnectTimeout, 2, "ConnectTimeout"),
+    (httpx.ReadTimeout, 2, "ReadTimeout"),
+    (503, 2, "HTTP 503"),
+    (401, 1, "HTTP 401"),
+    (403, 1, "HTTP 403"),
 ])
 def test_supplement_failures_are_bounded_and_diagnosable(weather, monkeypatch, caplog,
                                                        failure, attempts, reason, provider):
@@ -96,42 +98,71 @@ def test_supplement_failures_are_bounded_and_diagnosable(weather, monkeypatch, c
 
     def respond(request):
         requests.append(request)
-        if failure == "timeout":
-            raise httpx.ReadTimeout("", request=request)
+        if isinstance(failure, type):
+            raise failure("test-weather-key", request=request)
         return httpx.Response(failure)
 
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(service.asyncio, "sleep", fake_sleep)
     monkeypatch.setenv("JIANG_WEATHER_DETAIL_TOKEN", "test-weather-key")
     method = service.fetch_weather_open_meteo if provider == "open_meteo" else service.fetch_weather_alapi
     query = {"latitude": 36.07, "longitude": 120.33} if provider == "open_meteo" else "青岛"
     result = fetch_with_client(monkeypatch, service, respond, method, query)
 
     assert result is None
-    assert len(requests) == attempts[provider]
+    assert len(requests) == attempts
     assert reason in caplog.text
+    assert "test-weather-key" not in caplog.text
+    assert all("test-weather-key" not in str(request.url) for request in requests)
 
 
-def test_open_meteo_transient_failure_is_retried_once(weather, monkeypatch):
-    service, _ = weather
+@pytest.mark.parametrize("provider", ["open_meteo", "alapi"])
+@pytest.mark.parametrize("failure", [httpx.ConnectTimeout, httpx.ReadTimeout, 503])
+def test_supplement_transient_failure_recovers_with_retry_budget(weather, monkeypatch, provider, failure):
+    service, renderer = weather
     requests = []
     delays = []
+    payload = forecast()
+    payload["daily"] = {
+        "time": ["2026-10-10"], "temperature_2m_max": [23], "temperature_2m_min": [0],
+    }
+    response_data = {"temp": 21, "air": "37", "visibility": "16km"}
 
     def respond(request):
         requests.append(request)
         if len(requests) == 1:
+            if isinstance(failure, type):
+                raise failure("", request=request)
             return httpx.Response(503)
-        return httpx.Response(200, json=forecast())
+        data = payload if provider == "open_meteo" else {"success": True, "data": response_data}
+        return httpx.Response(200, json=data)
 
     async def fake_sleep(seconds):
         delays.append(seconds)
 
     monkeypatch.setattr(service.asyncio, "sleep", fake_sleep)
-    result = fetch_with_client(monkeypatch, service, respond,
-                               service.fetch_weather_open_meteo, {"latitude": 31.23, "longitude": 121.47})
+    monkeypatch.setenv("JIANG_WEATHER_DETAIL_TOKEN", "test-weather-key")
+    method = service.fetch_weather_open_meteo if provider == "open_meteo" else service.fetch_weather_alapi
+    query = {"latitude": 31.23, "longitude": 121.47} if provider == "open_meteo" else "青岛"
+    result = fetch_with_client(monkeypatch, service, respond, method, query)
 
     assert len(requests) == 2
-    assert delays == [service._OPEN_METEO_RETRY_DELAY]
-    assert [hour["time"][-5:] for hour in result["hour"]] == ["09:30", "10:00", "12:00", "14:00", "16:00"]
-    assert result["visibility"] == "0.4km"
+    assert delays == [service._SUPPLEMENT_RETRY_DELAY]
+    assert requests[0].extensions["timeout"] == {"connect": 2.0, "read": 3.0, "write": 2.0, "pool": 2.0}
+    assert requests[1].extensions["timeout"] == {"connect": 5.0, "read": 8.0, "write": 2.0, "pool": 2.0}
+    if provider == "open_meteo":
+        assert [hour["time"][-5:] for hour in result["hour"]] == ["09:30", "10:00", "12:00", "14:00", "16:00"]
+        assert result["visibility"] == "0.4km"
+        assert result["daily_trends"][0]["hourly_temps"] == list(range(24))
+        card = renderer.build_weather_card_data({}, "青岛", result)
+        assert renderer._build_hourly_items(card).count('class="hour-item"') == 5
+        daily = {"code": 200, "date": "2026/10/10", "wd1": 23, "wd2": 0}
+        rows = renderer._build_daily_rows(renderer._build_daily_days(daily, card))
+        assert '<svg viewBox="0 0 220 42"' in rows
+    else:
+        assert result == response_data
 
 
 def test_alapi_uses_post_without_credentials_in_url(weather, monkeypatch):
