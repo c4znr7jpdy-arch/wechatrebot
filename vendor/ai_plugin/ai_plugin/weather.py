@@ -53,9 +53,10 @@ _API_HOSTS = [
 ]
 
 _WEATHER_CACHE_TTL = 300
-# Open-Meteo 瞬时失败（超时/连接异常/5xx）时再试一次，避免单次抖动吞掉整卡逐小时数据。
-_OPEN_METEO_ATTEMPTS = 2
-_OPEN_METEO_RETRY_DELAY = 0.4
+# 补充源首次沿用快速请求预算，瞬时失败时给重试更充足的握手/读取时间。
+_SUPPLEMENT_ATTEMPTS = 2
+_SUPPLEMENT_RETRY_DELAY = 0.4
+_SUPPLEMENT_RETRY_TIMEOUT = httpx.Timeout(connect=5.0, read=8.0, write=2.0, pool=2.0)
 _weather_cache: dict[tuple[str, str, int], tuple[float, dict]] = {}
 
 
@@ -640,6 +641,33 @@ def _is_transient_supplement_error(exc: Exception) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
+async def _request_weather_supplement(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    provider: str,
+    **kwargs,
+) -> dict:
+    """仅为只读天气查询重试瞬时故障，不延长正常请求或共享客户端的预算。"""
+    for attempt in range(_SUPPLEMENT_ATTEMPTS):
+        try:
+            if attempt:
+                kwargs["timeout"] = _SUPPLEMENT_RETRY_TIMEOUT
+            response = await client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            if attempt + 1 >= _SUPPLEMENT_ATTEMPTS or not _is_transient_supplement_error(exc):
+                raise
+            logger.info(
+                "%s 请求瞬时失败(%s)，重试一次",
+                provider,
+                _supplement_failure_reason(exc),
+            )
+            await asyncio.sleep(_SUPPLEMENT_RETRY_DELAY)
+
+
 def _open_meteo_hours(current: dict, hourly: dict) -> list[dict]:
     current_time = str(current.get("time") or "")
     if not current_time:
@@ -699,21 +727,9 @@ async def fetch_weather_open_meteo(weather_data: dict) -> dict | None:
     }
     try:
         client = await _get_cma_client()
-        payload = None
-        for attempt in range(_OPEN_METEO_ATTEMPTS):
-            try:
-                response = await client.get(_OPEN_METEO_URL, params=params)
-                response.raise_for_status()
-                payload = response.json()
-                break
-            except Exception as exc:
-                if attempt + 1 >= _OPEN_METEO_ATTEMPTS or not _is_transient_supplement_error(exc):
-                    raise
-                logger.info(
-                    "Open-Meteo 请求瞬时失败(%s)，重试一次",
-                    _supplement_failure_reason(exc),
-                )
-                await asyncio.sleep(_OPEN_METEO_RETRY_DELAY)
+        payload = await _request_weather_supplement(
+            client, "GET", _OPEN_METEO_URL, provider="Open-Meteo", params=params,
+        )
         current = payload.get("current") or {}
         hourly = payload.get("hourly") or {}
         weather_text, weather_code = _wmo_condition(current.get("weather_code"))
@@ -787,11 +803,10 @@ async def fetch_weather_alapi(city: str) -> dict | None:
     try:
         url = "https://v3.alapi.cn/api/tianqi"
         client = await _get_cma_client()
-        response = await client.post(
-            url, json={"token": token, "city": city, "hour": True},
+        data = await _request_weather_supplement(
+            client, "POST", url, provider="ALAPI",
+            json={"token": token, "city": city, "hour": True},
         )
-        response.raise_for_status()
-        data = response.json()
         if data.get("success") and isinstance(data.get("data"), dict):
             result = data["data"]
             _alapi_cache[cache_key] = (time.monotonic(), result)

@@ -278,7 +278,7 @@
     },
     {
       "path": "ai_plugin/ai_plugin/weather.py",
-      "sha256": "02984b55211a82f5b377491c114bbe95cf6cfd2f025b9cbca7068cedbae0b247"
+      "sha256": "a5a706920c7a8fe2d717ba1c2206f77821adacce4e286becaa562a4c11a27160"
     },
     {
       "path": "ai_plugin/ai_plugin/weather_card.html",
