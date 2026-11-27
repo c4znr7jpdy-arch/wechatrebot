@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -17,7 +18,9 @@ from build_update_release import _sign_manifest
 from test_payload import _payload_files
 from wechatrebot_manager import launcher, payload, runtime_deployment, runtime_install, update_download
 from wechatrebot_manager.json_io import write_json_atomic
-from wechatrebot_manager.runtime_manifest import ENVIRONMENT_MANIFEST, parse_environment
+from wechatrebot_manager.runtime_manifest import (
+    ENGINE_PATH, ENVIRONMENT_MANIFEST, ENVIRONMENT_RECEIPT, REQUIRED_RUNTIME_FILES, parse_environment,
+)
 from wechatrebot_manager.update_manifest import UpdateChannel, UpdateError
 from wechatrebot_manager.update_errors import UpdateFailure
 from wechatrebot_manager.update_rollback import UpdateFileBackup, snapshot_update_targets
@@ -294,6 +297,110 @@ def test_runtime_api_blocks_start_and_license_connection_during_install(tmp_path
     for action in ("start", "connect_wechat", "resume_pending_start"):
         assert api._queue_robot_action(action, "starting")["data"]["accepted"] is False
     assert not api._action_lock.locked()
+
+
+def test_completed_environment_is_ready_on_reopen_and_license_refresh_without_file_scan(
+        environment_factory, tmp_path, monkeypatch):
+    from test_app_shell import _api
+    from wechatrebot_manager import runtime_api
+
+    env, _, _ = environment_factory()
+    root = tmp_path / "install"
+    write_json_atomic(root / ENVIRONMENT_MANIFEST, env.manifest)
+    runtime_install.install_environment(root, environment_factory.channel)
+    environment_factory.requests.clear()
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("opening the manager or refreshing a license must not rescan runtime files")
+
+    monkeypatch.setattr(runtime_deployment, "sha256_file", unexpected)
+    monkeypatch.setattr(payload, "sha256_file", unexpected)
+    monkeypatch.setattr(runtime_api.threading.Thread, "start", unexpected)
+    for _ in range(2):
+        api = _api(root)
+        api._update_channel = environment_factory.channel
+        api._authorized_history_account = lambda account: account
+        api._license_account = lambda: ""
+        api._licenses = SimpleNamespace(refresh=lambda: None, snapshot=lambda _account: {"authorized": True})
+        api._lifecycle.refresh = lambda: SimpleNamespace(to_dict=lambda: {"can_start": True})
+        for refresh_license in (False, True):
+            if refresh_license:
+                assert api.refresh_license()["ok"] is True
+            status = api.get_status()["data"]
+            assert status["runtime_environment"]["state"] == "ready"
+            assert status["runtime_environment"]["ready"] is True
+            assert status["can_start"] is True
+    assert not environment_factory.requests
+
+
+def test_runtime_first_install_uses_existing_transaction_then_reopens_ready(environment_factory, tmp_path, monkeypatch):
+    from test_app_shell import _api
+    from wechatrebot_manager import runtime_api
+
+    env, assets, _ = environment_factory()
+    root = tmp_path / "install"
+    write_json_atomic(root / ENVIRONMENT_MANIFEST, env.manifest)
+    api = _api(root)
+    api._update_channel = environment_factory.channel
+    api._lifecycle.maintenance_stopped = lambda: True
+    assert api._runtime_environment_status()["state"] == "missing"
+    assert not environment_factory.requests
+    monkeypatch.setattr(runtime_api.threading, "Thread", lambda *, target, daemon: SimpleNamespace(start=target))
+    assert api.install_runtime_environment()["data"]["accepted"] is True
+    assert api._runtime_environment_status()["ready"] is True
+    assert not api._action_lock.locked() and not api._update_lock.locked()
+    assert len(environment_factory.requests) == len(assets)
+    reopened = _api(root)
+    reopened._update_channel = environment_factory.channel
+    assert reopened._runtime_environment_status()["ready"] is True
+
+
+@pytest.mark.parametrize("change", ["missing", "invalid_json", "invalid_utf8", "list", "schema", "boolean_schema", "id",
+                                  "journal", "oversized", "missing_manifest", *sorted(REQUIRED_RUNTIME_FILES)])
+def test_unfinished_or_changed_environment_is_not_marked_ready(environment_factory, tmp_path, change):
+    from test_app_shell import _api
+
+    env, _, source = environment_factory()
+    root = tmp_path / "install"
+    shutil.copytree(source, root / "runtime")
+    (root / ENGINE_PATH).mkdir(parents=True)
+    write_json_atomic(root / ENVIRONMENT_MANIFEST, env.manifest)
+    receipt_path = root / ENVIRONMENT_RECEIPT
+    write_json_atomic(receipt_path, {"schema_version": 1, "id": env.identity})
+    if change == "missing":
+        receipt_path.unlink()
+    elif change == "invalid_json":
+        receipt_path.write_text("{")
+    elif change == "invalid_utf8":
+        receipt_path.write_bytes(b"\xff")
+    elif change == "list":
+        write_json_atomic(receipt_path, [])
+    elif change in {"schema", "boolean_schema", "id"}:
+        write_json_atomic(receipt_path, {"schema_version": {"schema": 2, "boolean_schema": True}.get(change, 1),
+                                        "id": "old environment" if change == "id" else env.identity})
+    elif change == "journal":
+        write_json_atomic(root / runtime_install.ENVIRONMENT_JOURNAL, {"environment_transaction": 1})
+    elif change == "oversized":
+        receipt_path.write_bytes(b" " * 4097)
+    elif change == "missing_manifest":
+        (root / ENVIRONMENT_MANIFEST).unlink()
+    else:
+        (root / change).unlink()
+    api = _api(root)
+    api._update_channel = environment_factory.channel
+    status = api._runtime_environment_status()
+    assert status["state"] in {"missing", "failed"}
+    assert status["ready"] is False
+    assert not environment_factory.requests
+
+
+def test_legacy_runtime_status_does_not_require_receipt_but_blocks_interrupted_install(tmp_path):
+    from test_app_shell import _api
+
+    assert _api(tmp_path)._runtime_environment_status() == {"state": "legacy", "ready": True}
+    write_json_atomic(tmp_path / runtime_install.ENVIRONMENT_JOURNAL, {"environment_transaction": 1})
+    status = _api(tmp_path)._runtime_environment_status()
+    assert status["state"] == "failed" and status["ready"] is False
 
 
 def test_runtime_install_worker_start_failure_releases_locks_and_can_retry(tmp_path, monkeypatch):
