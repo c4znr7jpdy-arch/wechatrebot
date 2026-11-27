@@ -1,4 +1,7 @@
 from io import BytesIO
+import copy
+from dataclasses import replace
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -20,6 +23,7 @@ from wechatrebot_manager.provider import (
     normalize_api_base,
     provider_display_name,
     provider_source_id,
+    prepare_provider_save,
     supports_thinking_toggle,
     thinking_mode_adapter,
     without_thinking_mode,
@@ -41,6 +45,206 @@ def test_provider_profile_generates_astrbot_source_and_model() -> None:
     assert source["timeout"] == PROVIDER_REQUEST_TIMEOUT_SECONDS
     assert model["id"] == "commercial_openai/chat-model"
     assert model["provider_source_id"] == source["id"]
+
+
+def test_provider_profile_keeps_public_id_independent_of_connection() -> None:
+    profile = OpenAIProviderProfile(
+        "secret", "https://example.test/v1", "vendor/model", "isolated",
+        provider_id=" legacy/vendor/model ",
+    )
+    assert profile.validate() == ()
+    assert profile.normalized().provider_id == "legacy/vendor/model"
+    assert profile.model_id == "legacy/vendor/model"
+    assert profile.astrbot_model()["id"] == "legacy/vendor/model"
+    assert profile.astrbot_model()["provider_source_id"] == "isolated"
+
+
+@pytest.mark.parametrize("identifier", ["x" * 257, "old\nmodel", "old\x7fmodel", "old\x85model", "\nold/model"])
+def test_provider_profile_rejects_invalid_public_ids(identifier) -> None:
+    profile = OpenAIProviderProfile(
+        "secret", "https://example.test/v1", "model", provider_id=identifier,
+    )
+    assert "模型服务 ID 格式无效" in " ".join(profile.validate())
+    with pytest.raises(ValueError, match="模型服务 ID 格式无效"):
+        prepare_provider_save(profile, [], [])
+
+
+def _provider_save_records():
+    profile = OpenAIProviderProfile("old-secret", "https://example.test/v1", "first", "shared")
+    return profile, [profile.astrbot_source()], [profile.astrbot_model()]
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_editing_shared_credentials_isolates_source_and_keeps_model_id(enabled) -> None:
+    profile, sources, providers = _provider_save_records()
+    sibling = replace(profile, model="second").astrbot_model()
+    sibling["enable"] = enabled
+    providers.append(sibling)
+    original = copy.deepcopy((sources, providers))
+
+    saved, source = prepare_provider_save(replace(profile, api_key="new-secret"), sources, providers)
+
+    assert saved.model_id == profile.model_id
+    assert saved.source_id != profile.source_id
+    assert source["id"] == saved.source_id
+    assert source["key"] == ["new-secret"]
+    assert (sources, providers) == original
+
+
+def test_adding_different_model_credentials_does_not_overwrite_existing_source() -> None:
+    profile, sources, providers = _provider_save_records()
+    saved, source = prepare_provider_save(
+        replace(profile, model="second", api_key="other-secret"), sources, providers,
+        create_new=True,
+    )
+    assert saved.source_id != profile.source_id
+    assert saved.model_id == f"{saved.source_id}/second"
+    assert source["key"] == ["other-secret"]
+    assert sources[0]["key"] == ["old-secret"]
+
+
+def test_adding_same_model_with_other_credentials_creates_distinct_identity() -> None:
+    profile, sources, providers = _provider_save_records()
+    saved, source = prepare_provider_save(
+        replace(profile, api_key="other-secret"), sources, providers, create_new=True,
+    )
+    assert saved.model_id != profile.model_id
+    assert saved.model_id == f"{saved.source_id}/first"
+    assert source["key"] == ["other-secret"]
+    assert providers[0]["id"] == profile.model_id
+    assert sources[0]["key"] == ["old-secret"]
+
+
+def test_adding_same_model_after_isolation_checks_actual_model_credentials() -> None:
+    profile, sources, providers = _provider_save_records()
+    isolated = replace(profile, source_id="isolated", api_key="other-secret", provider_id=profile.model_id)
+    sources.append(isolated.astrbot_source())
+    providers[0] = isolated.astrbot_model()
+    saved, source = prepare_provider_save(profile, sources, providers, create_new=True)
+    assert saved.model_id != profile.model_id
+    assert saved.source_id not in {"shared", "isolated"}
+    assert source["key"] == ["old-secret"]
+    assert providers[0]["provider_source_id"] == "isolated"
+
+
+def test_duplicate_of_isolated_model_reuses_its_existing_connection() -> None:
+    profile, sources, providers = _provider_save_records()
+    isolated = replace(profile, source_id="isolated", api_key="other-secret", provider_id=profile.model_id)
+    sources.append({**isolated.astrbot_source(), "proxy": "http://127.0.0.1:9000"})
+    providers[0] = isolated.astrbot_model()
+    providers.append(replace(profile, model="second").astrbot_model())
+    saved, source = prepare_provider_save(
+        replace(profile, api_key="other-secret"), sources, providers, create_new=True,
+    )
+    assert saved.model_id == profile.model_id
+    assert saved.source_id == "isolated"
+    assert source["proxy"] == "http://127.0.0.1:9000"
+
+
+@pytest.mark.parametrize("sources,providers", [(None, None), ({}, {}), ([], [None]), ([None], [])])
+def test_provider_save_accepts_missing_or_legacy_record_lists(sources, providers) -> None:
+    profile = OpenAIProviderProfile("secret", "https://example.test/v1", "model")
+    saved, source = prepare_provider_save(profile, sources, providers)
+    assert saved == profile.normalized()
+    assert source == profile.astrbot_source()
+
+
+@pytest.mark.parametrize("create_new", [False, True])
+def test_matching_credentials_reuse_source_and_model_identity(create_new) -> None:
+    profile, sources, providers = _provider_save_records()
+    sources[0]["api_base"] = "https://example.test/"
+    saved, source = prepare_provider_save(profile, sources, providers, create_new=create_new)
+    assert saved.model_id == profile.model_id
+    assert saved.source_id == profile.source_id
+    assert source["api_base"] == "https://example.test/v1"
+
+
+def test_editing_exclusive_source_updates_in_place() -> None:
+    profile, sources, providers = _provider_save_records()
+    saved, source = prepare_provider_save(
+        replace(profile, api_key="replacement"), sources, providers,
+    )
+    assert saved.source_id == profile.source_id
+    assert saved.model_id == profile.model_id
+    assert source["key"] == ["replacement"]
+
+
+def test_multiple_saved_keys_are_not_treated_as_one_matching_key() -> None:
+    profile, sources, providers = _provider_save_records()
+    sources[0]["key"] = [profile.api_key, "rotation-secret"]
+    providers.append(replace(profile, model="second").astrbot_model())
+    saved, source = prepare_provider_save(profile, sources, providers)
+    assert saved.source_id != profile.source_id
+    assert saved.model_id == profile.model_id
+    assert source["key"] == [profile.api_key]
+    assert sources[0]["key"] == [profile.api_key, "rotation-secret"]
+
+
+def test_source_clone_preserves_transport_extras_but_replaces_managed_fields() -> None:
+    profile, sources, providers = _provider_save_records()
+    sources[0].update({
+        "proxy": "http://127.0.0.1:9000", "custom_headers": {"x-route": "region"},
+        "api_version": "2025-01-01", "provider": "azure", "type": "azure_openai",
+        "timeout": 900, "enable": False,
+    })
+    providers.append(replace(profile, model="second").astrbot_model())
+    saved, source = prepare_provider_save(replace(profile, api_key="replacement"), sources, providers)
+    for field in ("proxy", "custom_headers", "api_version", "provider", "type"):
+        assert source[field] == sources[0][field]
+    assert source["timeout"] == PROVIDER_REQUEST_TIMEOUT_SECONDS
+    assert source["enable"] is True
+    assert source["embedding_api_key"] == "replacement"
+    assert source["embedding_api_base"] == saved.api_base
+    source["custom_headers"]["x-route"] = "changed"
+    assert sources[0]["custom_headers"] == {"x-route": "region"}
+
+
+def test_changed_endpoint_inherits_previous_model_transport_extras() -> None:
+    profile, sources, providers = _provider_save_records()
+    sources[0]["proxy"] = "http://127.0.0.1:9000"
+    saved, source = prepare_provider_save(
+        replace(profile, source_id="another", api_base="https://other.test/v1",
+                provider_id=profile.model_id),
+        sources, providers,
+    )
+    assert saved.model_id == profile.model_id
+    assert source["id"] == "another"
+    assert source["api_base"] == "https://other.test/v1"
+    assert source["proxy"] == sources[0]["proxy"]
+
+
+def test_shared_source_endpoint_change_also_isolates_credentials() -> None:
+    profile, sources, providers = _provider_save_records()
+    providers.append(replace(profile, model="second").astrbot_model())
+    saved, source = prepare_provider_save(
+        replace(profile, api_base="https://other.test/v1"), sources, providers,
+    )
+    assert saved.source_id != profile.source_id
+    assert saved.model_id == profile.model_id
+    assert source["api_base"] == "https://other.test/v1"
+    assert sources[0]["api_base"] == profile.api_base
+
+
+def test_generated_source_id_is_random_not_derived_from_secret(monkeypatch) -> None:
+    profile, sources, providers = _provider_save_records()
+    providers.append(replace(profile, model="second").astrbot_model())
+    monkeypatch.setattr(provider, "uuid4", lambda: SimpleNamespace(hex="0123456789abcdef" * 2))
+    generated = [
+        prepare_provider_save(replace(profile, api_key=secret), sources, providers)[0]
+        for secret in ("first-private-key", "second-private-key")
+    ]
+    assert [item.source_id for item in generated] == ["custom_0123456789abcdef01234567"] * 2
+    assert all(item.validate() == () for item in generated)
+
+
+def test_generated_source_id_skips_existing_source_collision(monkeypatch) -> None:
+    profile, sources, providers = _provider_save_records()
+    providers.append(replace(profile, model="second").astrbot_model())
+    sources.append({"id": "custom_" + "a" * 24})
+    identifiers = iter(("a" * 32, "b" * 32))
+    monkeypatch.setattr(provider, "uuid4", lambda: SimpleNamespace(hex=next(identifiers)))
+    saved, _ = prepare_provider_save(replace(profile, api_key="replacement"), sources, providers)
+    assert saved.source_id == "custom_" + "b" * 24
 
 
 def test_provider_profile_rejects_insecure_remote_url() -> None:

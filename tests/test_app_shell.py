@@ -414,7 +414,7 @@ def test_first_provider_save_uses_jyjapi_grok_source(
     captured = {}
     monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
 
-    def fake_save(_root, profile, *, make_default=True):
+    def fake_save(_root, profile, *, make_default=True, create_new=False):
         captured["profile"] = profile.normalized()
         captured["make_default"] = make_default
         return captured["profile"]
@@ -442,7 +442,7 @@ def test_every_new_model_passes_selected_thinking_mode_to_save(monkeypatch, tmp_
     monkeypatch.setattr(model_api, "load_provider_profile", lambda _root: None)
     monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: SimpleNamespace(is_available=lambda: False))
 
-    def fake_save(_root, profile, *, make_default=True):
+    def fake_save(_root, profile, *, make_default=True, create_new=False):
         captured["profile"] = profile
         return profile.normalized()
 
@@ -476,7 +476,7 @@ def test_custom_chat_service_save_preserves_declared_multimodal_input(
         lambda _root: SimpleNamespace(is_available=lambda: False),
     )
 
-    def fake_save(_root, profile, *, make_default=True):
+    def fake_save(_root, profile, *, make_default=True, create_new=False):
         captured["profile"] = profile.normalized()
         return captured["profile"]
 
@@ -704,6 +704,7 @@ def test_new_provider_keeps_the_existing_reply_model(
         def save_provider(profile, **kwargs):
             captured["profile"] = profile.normalized()
             captured.update(kwargs)
+            return captured["profile"]
 
     monkeypatch.setattr(model_api, "EngineApiClient", lambda _root: AvailableClient())
 
@@ -744,7 +745,7 @@ def test_switching_an_existing_service_preset_uses_the_new_source(
         lambda _root: SimpleNamespace(is_available=lambda: False),
     )
 
-    def fake_save(_root, profile, *, make_default=True):
+    def fake_save(_root, profile, *, make_default=True, create_new=False):
         captured["profile"] = profile.normalized()
         captured["make_default"] = make_default
         return captured["profile"]
@@ -787,8 +788,9 @@ def test_model_settings_preserve_explicit_analysis_binding(
         def is_available(self):
             return online
 
-        def save_provider(self, *args, **kwargs):
+        def save_provider(self, profile, **kwargs):
             calls.append("provider")
+            return profile.normalized()
 
         def set_default_provider(self, provider_id):
             calls.append("provider")
@@ -858,7 +860,7 @@ def test_switching_default_model_updates_automatic_core_bindings(
         api_key="new-key", api_base="https://example.test/v1", model="new-chat",
     ).normalized()
     model_api.save_provider_profile(tmp_path, old)
-    model_api.save_provider_profile(tmp_path, new, make_default=False)
+    new = model_api.save_provider_profile(tmp_path, new, make_default=False)
     data_root = tmp_path / "app" / "astrbot" / "data"
     (data_root / "plugins" / "astrbot_plugin_angel_heart").mkdir(parents=True)
     path = data_root / "config" / "astrbot_plugin_angel_heart_config.json"
